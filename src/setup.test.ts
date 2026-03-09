@@ -17,11 +17,7 @@ const HooksStopSchema = v.object({
   }),
 });
 
-const CopilotHooksSchema = v.object({
-  hooks: v.object({
-    agentStop: v.array(v.object({ type: v.string(), bash: v.string() })),
-  }),
-});
+
 
 const readJsonFile = async (path: string): Promise<unknown> => {
   const raw = await readFile(path, 'utf-8');
@@ -78,33 +74,22 @@ describe('runSetup --non-interactive', () => {
     expect(Object.keys(config.checks)).toHaveLength(0);
   });
 
-  test('creates Claude Code hook by default', async () => {
+  test('does not create Claude Code hook in non-interactive mode', async () => {
     await writeFile(join(dir, 'package.json'), JSON.stringify({}));
 
     await runSetup(dir, { nonInteractive: true });
 
-    const json = await readJsonFile(join(dir, '.claude', 'settings.json'));
-    const settings = v.parse(HooksStopSchema, json);
-
-    expect(settings.hooks.Stop).toEqual([
-      {
-        matcher: '',
-        hooks: [{ type: 'command', command: 'pnpm check-changed run --format claude-code-hooks' }],
-      },
-    ]);
+    await expect(readJsonFile(join(dir, '.claude', 'settings.json'))).rejects.toThrow();
   });
 
-  test('creates Copilot CLI hook by default', async () => {
+  test('does not create Copilot CLI hook in non-interactive mode', async () => {
     await writeFile(join(dir, 'package.json'), JSON.stringify({}));
 
     await runSetup(dir, { nonInteractive: true });
 
-    const json = await readJsonFile(join(dir, '.github', 'hooks', 'check-changed.json'));
-    const config = v.parse(CopilotHooksSchema, json);
-
-    expect(config.hooks.agentStop).toEqual([
-      { type: 'command', bash: 'pnpm check-changed run --format copilot-cli-hooks' },
-    ]);
+    await expect(
+      readJsonFile(join(dir, '.github', 'hooks', 'check-changed.json')),
+    ).rejects.toThrow();
   });
 
   test('preserves existing config defaults when updating', async () => {

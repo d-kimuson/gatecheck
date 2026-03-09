@@ -38,6 +38,20 @@ const parseFileList = (output: string): readonly string[] =>
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
 
+const describeSource = (source: ChangedSource): string => {
+  switch (source.type) {
+    case 'branch':
+      return `branch '${source.name}'`;
+    case 'sha':
+      return `sha '${source.sha}'`;
+    case "staged": { throw new Error('Not implemented yet: "staged" case') }
+    case "unstaged": { throw new Error('Not implemented yet: "unstaged" case') }
+    case "untracked": { throw new Error('Not implemented yet: "untracked" case') }
+    default:
+      return source.type;
+  }
+};
+
 export const getChangedFiles = async (
   sources: readonly ChangedSource[],
   cwd: string,
@@ -45,8 +59,13 @@ export const getChangedFiles = async (
   const results = await Promise.all(
     sources.map(async (source) => {
       const args = gitCommandForSource(source);
-      const output = await exec('git', args, cwd);
-      return parseFileList(output);
+      try {
+        const output = await exec('git', args, cwd);
+        return parseFileList(output);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        throw new Error(`Failed to get changed files for ${describeSource(source)}: ${detail}`);
+      }
     }),
   );
 

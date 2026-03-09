@@ -1,4 +1,4 @@
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import pkg from '../package.json' with { type: 'json' };
 import { loadConfig, ConfigNotFoundError } from './config.ts';
 import { getChangedFiles } from './git.ts';
@@ -18,8 +18,16 @@ const parseChangedSource = (raw: string): ChangedSource => {
   if (raw === 'untracked') return { type: 'untracked' };
   if (raw === 'unstaged') return { type: 'unstaged' };
   if (raw === 'staged') return { type: 'staged' };
-  if (raw.startsWith('branch:')) return { type: 'branch', name: raw.slice(7) };
-  if (raw.startsWith('sha:')) return { type: 'sha', sha: raw.slice(4) };
+  if (raw.startsWith('branch:')) {
+    const name = raw.slice(7);
+    if (name === '') throw new Error('branch: requires a branch name (e.g. branch:main)');
+    return { type: 'branch', name };
+  }
+  if (raw.startsWith('sha:')) {
+    const sha = raw.slice(4);
+    if (sha === '') throw new Error('sha: requires a commit SHA (e.g. sha:abc1234)');
+    return { type: 'sha', sha };
+  }
   throw new Error(`Unknown changed source: ${raw}`);
 };
 
@@ -79,6 +87,14 @@ const run = async (opts: RunOpts): Promise<void> => {
       : config.defaults.target === 'all'
         ? ('all' as const)
         : config.defaults.target.split(',').map((s) => s.trim());
+
+  if (target !== 'all') {
+    const knownGroups = new Set(Object.values(config.checks).map((c) => c.group));
+    const unknown = target.filter((t) => !knownGroups.has(t));
+    if (unknown.length > 0) {
+      logError(`Warning: unknown target group(s): ${unknown.join(', ')}`);
+    }
+  }
 
   const checks = new Map(
     Object.entries(config.checks).filter(([, check]) =>
@@ -141,9 +157,13 @@ program
   )
   .option('-t, --target <groups>', 'Target groups (comma-separated or "all")')
   .option('-d, --dry-run', 'Show which checks would run without executing them')
-  .option(
-    '-f, --format <format>',
-    'Output format: text (default), json, claude-code-hooks, or copilot-cli-hooks',
+  .addOption(
+    new Option('-f, --format <format>', 'Output format').choices([
+      'text',
+      'json',
+      'claude-code-hooks',
+      'copilot-cli-hooks',
+    ]),
   )
   .action(run);
 

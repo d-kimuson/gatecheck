@@ -234,35 +234,6 @@ const promptClaudeCodeHooks = async (cwd: string, runner: string): Promise<void>
   log(`Claude Code hook written to ${settingsPath}`);
 };
 
-const setupClaudeCodeHooks = async (cwd: string, runner: string): Promise<void> => {
-  const settingsPath = resolveClaudeSettingsPath(cwd);
-  const command = `${runner} check-changed run --format claude-code-hooks`;
-  const settings = await readClaudeSettings(settingsPath);
-
-  if (hasStopHook(settings, command)) {
-    log('Claude Code Stop hook is already configured.');
-    return;
-  }
-
-  const hookEntry = {
-    matcher: '',
-    hooks: [{ type: 'command', command }],
-  };
-
-  const existingStop = settings.hooks?.Stop ?? [];
-  const updated = {
-    ...settings,
-    hooks: {
-      ...settings.hooks,
-      Stop: [...existingStop, hookEntry],
-    },
-  };
-
-  await mkdir(dirname(settingsPath), { recursive: true });
-  await writeFile(settingsPath, `${JSON.stringify(updated, null, 2)}\n`);
-  log(`Claude Code hook written to ${settingsPath}`);
-};
-
 // -- Copilot CLI hooks --
 
 const CopilotHookEntrySchema = v.object({
@@ -340,32 +311,6 @@ const promptCopilotCliHooks = async (cwd: string, runner: string): Promise<void>
   log(`Copilot CLI hook written to ${hooksPath}`);
 };
 
-const setupCopilotCliHooks = async (cwd: string, runner: string): Promise<void> => {
-  const hooksPath = resolveCopilotHooksPath(cwd);
-  const bash = `${runner} check-changed run --format copilot-cli-hooks`;
-  const config = await readCopilotHooksFile(hooksPath);
-
-  if (hasCopilotAgentStopHook(config, bash)) {
-    log('Copilot CLI agentStop hook is already configured.');
-    return;
-  }
-
-  const hookEntry = { type: 'command', bash };
-  const existingAgentStop = config.hooks?.agentStop ?? [];
-  const updated = {
-    ...config,
-    version: config.version,
-    hooks: {
-      ...config.hooks,
-      agentStop: [...existingAgentStop, hookEntry],
-    },
-  };
-
-  await mkdir(dirname(hooksPath), { recursive: true });
-  await writeFile(hooksPath, `${JSON.stringify(updated, null, 2)}\n`);
-  log(`Copilot CLI hook written to ${hooksPath}`);
-};
-
 // -- Main --
 
 export const runSetup = async (cwd: string, options?: SetupOptions): Promise<void> => {
@@ -403,17 +348,11 @@ export const runSetup = async (cwd: string, options?: SetupOptions): Promise<voi
   await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
   log(`\nConfig written to ${configPath}`);
 
-  log('');
-  if (nonInteractive) {
-    await setupClaudeCodeHooks(cwd, runner);
-  } else {
+  if (!nonInteractive) {
+    log('');
     await promptClaudeCodeHooks(cwd, runner);
-  }
 
-  log('');
-  if (nonInteractive) {
-    await setupCopilotCliHooks(cwd, runner);
-  } else {
+    log('');
     await promptCopilotCliHooks(cwd, runner);
   }
 };
