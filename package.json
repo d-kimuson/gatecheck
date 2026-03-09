@@ -1,6 +1,6 @@
 {
   "name": "check-changed",
-  "version": "0.0.1-beta.1",
+  "version": "0.0.1-beta.2",
   "description": "Lightweight adapter for running verification tools against git-changed files, with built-in AI agent hook support",
   "license": "MIT",
   "bin": {
