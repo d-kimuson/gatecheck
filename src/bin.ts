@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 import { Command, Option } from 'commander';
 import pkg from '../package.json' with { type: 'json' };
 import { loadConfig, ConfigNotFoundError } from './config.ts';
