@@ -1,18 +1,19 @@
 #!/usr/bin/env node
 
-import { Command, Option } from 'commander';
+import { Command } from 'commander';
 import pkg from '../package.json' with { type: 'json' };
 import { loadConfig, ConfigNotFoundError } from './config.ts';
-import { getChangedFiles } from './git.ts';
+import { getChangedFiles, getDiffSummary } from './git.ts';
 import { log, logError } from './logger.ts';
 import {
   runChecks,
+  runReviews,
   dryRunChecks,
-  reportResults,
-  reportResultsJson,
-  reportResultsHooks,
+  dryRunReviews,
+  reportCheckResults,
+  reportReviewResults,
 } from './runner.ts';
-import type { ChangedSource, CheckResult } from './types.ts';
+import type { ChangedSource } from './types.ts';
 
 // -- Parse ChangedSource --
 
@@ -36,117 +37,113 @@ const parseChangedSource = (raw: string): ChangedSource => {
 const parseChangedSources = (raw: string): readonly ChangedSource[] =>
   raw.split(',').map((s) => parseChangedSource(s.trim()));
 
-// -- Run checks --
+const DEFAULT_SOURCES: readonly ChangedSource[] = [{ type: 'unstaged' }, { type: 'staged' }];
 
-type RunOpts = {
+// -- Target filtering --
+
+const filterByTarget = <T extends { readonly group: string }>(
+  entries: readonly T[],
+  target: string | undefined,
+): readonly T[] => {
+  if (target === undefined || target === 'all') {
+    return entries;
+  }
+
+  const groups = target.split(',').map((s) => s.trim());
+  const knownGroups = new Set(entries.map((e) => e.group));
+  const unknown = groups.filter((g) => !knownGroups.has(g));
+  if (unknown.length > 0) {
+    logError(`Warning: unknown target group(s): ${unknown.join(', ')}`);
+  }
+
+  return entries.filter((e) => groups.includes(e.group));
+};
+
+// -- check command --
+
+type CheckOpts = {
   changed?: string;
   target?: string;
   dryRun?: boolean;
-  format?: string;
 };
 
-type OutputFormat = 'text' | 'json' | 'claude-code-hooks' | 'copilot-cli-hooks';
-
-const getFormat = (opts: RunOpts): OutputFormat => {
-  if (opts.format === 'json') return 'json';
-  if (opts.format === 'claude-code-hooks') return 'claude-code-hooks';
-  if (opts.format === 'copilot-cli-hooks') return 'copilot-cli-hooks';
-  return 'text';
-};
-
-const isSilent = (fmt: OutputFormat): boolean => fmt !== 'text';
-
-const validateRunOptions = (opts: RunOpts, fmt: OutputFormat): void => {
-  if (opts.dryRun === true && fmt !== 'text') {
-    throw new Error('--dry-run can only be used with --format text');
-  }
-};
-
-const getReporter = (fmt: OutputFormat): ((results: readonly CheckResult[]) => boolean) => {
-  switch (fmt) {
-    case 'json':
-      return reportResultsJson;
-    case 'claude-code-hooks':
-      return reportResultsHooks;
-    case 'copilot-cli-hooks':
-      return reportResultsHooks;
-    case 'text':
-      return reportResults;
-    default: {
-      const _exhaustive: never = fmt;
-      throw new Error(`Unknown format: ${String(_exhaustive)}`);
-    }
-  }
-};
-
-const run = async (opts: RunOpts): Promise<void> => {
+const check = async (opts: CheckOpts): Promise<void> => {
   const cwd = process.cwd();
-  const fmt = getFormat(opts);
-  validateRunOptions(opts, fmt);
   const config = await loadConfig(cwd);
+  const entries = filterByTarget(config.checks ?? [], opts.target);
 
-  const changedSources =
-    opts.changed !== undefined && opts.changed !== ''
-      ? parseChangedSources(opts.changed)
-      : parseChangedSources(config.defaults.changed);
-
-  const target =
-    opts.target !== undefined && opts.target !== '' && opts.target !== 'all'
-      ? opts.target.split(',').map((s) => s.trim())
-      : config.defaults.target === 'all'
-        ? ('all' as const)
-        : config.defaults.target.split(',').map((s) => s.trim());
-
-  if (target !== 'all') {
-    const knownGroups = new Set(Object.values(config.checks).map((c) => c.group));
-    const unknown = target.filter((t) => !knownGroups.has(t));
-    if (unknown.length > 0) {
-      logError(`Warning: unknown target group(s): ${unknown.join(', ')}`);
-    }
-  }
-
-  const checks = new Map(
-    Object.entries(config.checks).filter(([, check]) =>
-      target === 'all' ? true : target.includes(check.group),
-    ),
-  );
-
-  if (checks.size === 0) {
-    if (isSilent(fmt)) {
-      getReporter(fmt)([]);
-    } else {
-      log('No checks to run.');
-    }
+  if (entries.length === 0) {
+    log('No checks configured.');
     return;
   }
 
+  const changedSources =
+    opts.changed !== undefined ? parseChangedSources(opts.changed) : DEFAULT_SOURCES;
   const changedFiles = await getChangedFiles(changedSources, cwd);
 
   if (changedFiles.length === 0) {
-    if (isSilent(fmt)) {
-      getReporter(fmt)([]);
-    } else {
-      log('No changed files found.');
-    }
+    log('No changed files found.');
     return;
   }
 
-  if (!isSilent(fmt)) {
-    log(`Found ${changedFiles.length} changed file(s).`);
-  }
+  log(`Found ${changedFiles.length} changed file(s).`);
 
   if (opts.dryRun === true) {
     log('');
-    dryRunChecks(checks, changedFiles, cwd);
+    dryRunChecks(entries, changedFiles, cwd);
     return;
   }
 
-  if (!isSilent(fmt)) {
-    log(`Running ${checks.size} check(s)...`);
+  log(`Running ${entries.length} check(s)...`);
+
+  const results = await runChecks(entries, changedFiles, cwd);
+  const allPassed = reportCheckResults(results);
+
+  if (!allPassed) {
+    process.exitCode = 1;
+  }
+};
+
+// -- review command --
+
+type ReviewOpts = {
+  changed?: string;
+  dryRun?: boolean;
+};
+
+const review = async (opts: ReviewOpts): Promise<void> => {
+  const cwd = process.cwd();
+  const config = await loadConfig(cwd);
+  const entries = config.reviews ?? [];
+
+  if (entries.length === 0) {
+    log('No reviews configured.');
+    return;
   }
 
-  const results = await runChecks(checks, changedFiles, cwd);
-  const allPassed = getReporter(fmt)(results);
+  const changedSources =
+    opts.changed !== undefined ? parseChangedSources(opts.changed) : DEFAULT_SOURCES;
+  const changedFiles = await getChangedFiles(changedSources, cwd);
+
+  if (changedFiles.length === 0) {
+    log('No changed files found.');
+    return;
+  }
+
+  log(`Found ${changedFiles.length} changed file(s).`);
+
+  const diffSummary = await getDiffSummary(changedSources, cwd);
+
+  if (opts.dryRun === true) {
+    log('');
+    dryRunReviews(entries, changedFiles, cwd, diffSummary);
+    return;
+  }
+
+  log(`Running ${entries.length} review(s)...`);
+
+  const results = await runReviews(entries, changedFiles, cwd, diffSummary);
+  const allPassed = reportReviewResults(results);
 
   if (!allPassed) {
     process.exitCode = 1;
@@ -155,35 +152,28 @@ const run = async (opts: RunOpts): Promise<void> => {
 
 // -- CLI definition --
 
-const program = new Command().name(pkg.name).description(pkg.description).version(pkg.version);
+const program = new Command().name('gatecheck').description(pkg.description).version(pkg.version);
 
 program
-  .command('run', { isDefault: true })
-  .description('Run configured checks against changed files')
+  .command('check')
+  .description('Run deterministic checks (lint, typecheck, test) against changed files')
   .option(
     '-c, --changed <sources>',
     'Changed sources (comma-separated: untracked,unstaged,staged,branch:<name>,sha:<sha>)',
   )
   .option('-t, --target <groups>', 'Target groups (comma-separated or "all")')
-  .option('-d, --dry-run', 'Show which checks would run without executing them (text format only)')
-  .addOption(
-    new Option('-f, --format <format>', 'Output format').choices([
-      'text',
-      'json',
-      'claude-code-hooks',
-      'copilot-cli-hooks',
-    ]),
-  )
-  .action(run);
+  .option('-d, --dry-run', 'Show which checks would run without executing them')
+  .action(check);
 
 program
-  .command('setup')
-  .description('Create or update .check-changedrc.json')
-  .option('--non-interactive', 'Skip prompts and use defaults with auto-detected presets')
-  .action(async (opts: { nonInteractive?: boolean }) => {
-    const { runSetup } = await import('./setup.ts');
-    await runSetup(process.cwd(), { nonInteractive: opts.nonInteractive });
-  });
+  .command('review')
+  .description('Run AI-powered reviews against changed files')
+  .option(
+    '-c, --changed <sources>',
+    'Changed sources (comma-separated: untracked,unstaged,staged,branch:<name>,sha:<sha>)',
+  )
+  .option('-d, --dry-run', 'Show review configuration and matched files without executing')
+  .action(review);
 
 program.parseAsync().catch((error: unknown) => {
   if (error instanceof ConfigNotFoundError) {

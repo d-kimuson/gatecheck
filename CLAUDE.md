@@ -1,6 +1,6 @@
 ## Project Overview
 
-check-changed: CLI tool that runs checks (lint, typecheck, format, test) against git-changed files.
+gatecheck: CLI tool that sets quality gates on git changes — runs deterministic checks (lint, typecheck, test) and AI-powered reviews against changed files.
 Single-package repo, no monorepo.
 
 ## Tech Stack
@@ -10,7 +10,7 @@ Single-package repo, no monorepo.
 - Build: tsdown
 - Lint: oxlint (type-aware) + oxfmt
 - Test: vitest
-- Dependencies: commander, inquirer, valibot
+- Dependencies: commander, valibot, yaml
 
 ## Commands
 
@@ -27,16 +27,16 @@ Single-package repo, no monorepo.
 - No `as` type assertions, no `is` type guards
 - `as const satisfies` for constant objects
 - No `console.log` — use `log`/`logError` from `src/logger.ts` (oxlint no-console rule)
-- Discriminated unions for ADTs (see `CheckResult`, `ChangedSource` in `src/types.ts`)
+- Discriminated unions for ADTs (see `CheckResult`, `ReviewResult`, `ChangedSource` in `src/types.ts`)
 - Pre-commit hook via lefthook: runs oxlint + oxfmt on staged files
 
 ## Architecture
 
-- `src/bin.ts` — CLI entrypoint (commander)
-- `src/types.ts` — Type definitions (ADTs)
-- `src/config.ts` — Config loading + valibot schema
-- `src/git.ts` — Git diff → file list
-- `src/matcher.ts` — Glob matching via `path.matchesGlob`
-- `src/runner.ts` — Command building, execution, reporting (text + JSON)
-- `src/presets.ts` — Built-in check presets
-- `src/setup.ts` — Interactive setup (inquirer)
+- `src/bin.ts` — CLI entrypoint (commander): `gatecheck check` / `gatecheck review`
+- `src/types.ts` — Type definitions (ADTs): CheckEntry, ReviewEntry, CheckResult, ReviewResult
+- `src/config.ts` — YAML config loading (`gatecheck.yaml`) + valibot schema
+- `src/template.ts` — Template engine (`{{ scope.KEY }}`) with env/match/ctx/vars scopes
+- `src/git.ts` — Git diff → file list + diff summary
+- `src/matcher.ts` — Regex matching with named groups + exclude support
+- `src/runner.ts` — Check/review execution, fallbacks, dry-run, reporting
+- `src/logger.ts` — stdout/stderr output helpers

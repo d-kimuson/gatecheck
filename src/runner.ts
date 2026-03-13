@@ -1,41 +1,11 @@
 import { spawn } from 'node:child_process';
 import { relative } from 'node:path';
 import { log, logError } from './logger.ts';
-import { matchAndGroupFiles, matchFiles } from './matcher.ts';
-import type { CheckConfig, CheckResult } from './types.ts';
+import { matchFiles, groupMatchResults } from './matcher.ts';
+import * as template from './template.ts';
+import type { CheckEntry, ReviewEntry, CheckResult, ReviewResult } from './types.ts';
 
-const hasNamedGroups = (pattern: string): boolean => /\(\?<[^>]+>/.test(pattern);
-
-export const buildCommand = (
-  command: string,
-  matchedFiles: readonly string[],
-  changedFiles: CheckConfig['changedFiles'],
-  cwd: string,
-  groups?: Record<string, string>,
-): string | null => {
-  let cmd = command;
-
-  if (groups) {
-    for (const [key, value] of Object.entries(groups)) {
-      cmd = cmd.replaceAll(`{{${key}}}`, value);
-    }
-  }
-
-  if (!cmd.includes('{{CHANGED_FILES}}')) {
-    return matchedFiles.length > 0 ? cmd : null;
-  }
-
-  if (matchedFiles.length === 0) {
-    return null;
-  }
-
-  const sep = changedFiles?.separator ?? ' ';
-  const resolved =
-    changedFiles?.path === 'absolute' ? matchedFiles : matchedFiles.map((f) => relative(cwd, f));
-  const paths = resolved.map((p) => `'${p.replaceAll("'", "'\\''")}'`);
-
-  return cmd.replace('{{CHANGED_FILES}}', paths.join(sep));
-};
+// -- Shell execution --
 
 const runCommand = (
   command: string,
@@ -62,85 +32,64 @@ const runCommand = (
     });
   });
 
-const runSingleCheck = async (
-  name: string,
-  check: CheckConfig,
+// -- Helpers --
+
+const formatFileList = (files: readonly string[], cwd: string): string =>
+  files.map((f) => `'${relative(cwd, f).replaceAll("'", "'\\''")}'`).join(' ');
+
+const hasNamedGroups = (pattern: string): boolean => /\(\?<[^>]+>/.test(pattern);
+
+// -- Check execution --
+
+const runSingleCheckEntry = async (
+  entry: CheckEntry,
   changedFiles: readonly string[],
   cwd: string,
 ): Promise<readonly CheckResult[]> => {
-  if (hasNamedGroups(check.pattern)) {
-    return runGroupedCheck(name, check, changedFiles, cwd);
+  const matched = matchFiles(changedFiles, entry.match, cwd, entry.exclude);
+
+  if (matched.length === 0) {
+    return [{ status: 'skip', name: entry.name }];
   }
 
-  const matched = matchFiles(changedFiles, check.pattern, cwd);
-  const command = buildCommand(check.command, matched, check.changedFiles, cwd);
+  if (hasNamedGroups(entry.match)) {
+    const grouped = groupMatchResults(matched);
+    const results = await Promise.all(
+      [...grouped.entries()].map(async ([groupKey, group]): Promise<CheckResult> => {
+        const checkName = groupKey ? `${entry.name}[${groupKey}]` : entry.name;
+        const ctx = { CHANGED_FILES: formatFileList(group.files, cwd) };
+        const context = template.buildContext({ match: group.groups, ctx });
+        const command = template.resolve(entry.command, context);
 
-  if (command === null) {
-    return [{ status: 'skip', name, group: check.group }];
+        const { exitCode, stdout, stderr } = await runCommand(command, cwd);
+        if (exitCode === 0) {
+          return { status: 'passed', name: checkName, command };
+        }
+        return { status: 'failed', name: checkName, command, exitCode, stdout, stderr };
+      }),
+    );
+    return results;
   }
+
+  const allFiles = matched.map((m) => m.file);
+  const ctx = { CHANGED_FILES: formatFileList(allFiles, cwd) };
+  const context = template.buildContext({ ctx });
+  const command = template.resolve(entry.command, context);
 
   const { exitCode, stdout, stderr } = await runCommand(command, cwd);
   if (exitCode === 0) {
-    return [{ status: 'passed', name, group: check.group, command }];
+    return [{ status: 'passed', name: entry.name, command }];
   }
-  return [{ status: 'failed', name, group: check.group, command, exitCode, stdout, stderr }];
-};
-
-const runGroupedCheck = async (
-  name: string,
-  check: CheckConfig,
-  changedFiles: readonly string[],
-  cwd: string,
-): Promise<readonly CheckResult[]> => {
-  const grouped = matchAndGroupFiles(changedFiles, check.pattern, cwd);
-
-  if (grouped.size === 0) {
-    return [{ status: 'skip', name, group: check.group }];
-  }
-
-  const results = await Promise.all(
-    [...grouped.entries()].map(async ([groupKey, entry]): Promise<CheckResult> => {
-      const checkName = `${name}[${groupKey}]`;
-      const command = buildCommand(
-        check.command,
-        entry.files,
-        check.changedFiles,
-        cwd,
-        entry.groups,
-      );
-
-      if (command === null) {
-        return { status: 'skip', name: checkName, group: check.group };
-      }
-
-      const { exitCode, stdout, stderr } = await runCommand(command, cwd);
-      if (exitCode === 0) {
-        return { status: 'passed', name: checkName, group: check.group, command };
-      }
-      return {
-        status: 'failed',
-        name: checkName,
-        group: check.group,
-        command,
-        exitCode,
-        stdout,
-        stderr,
-      };
-    }),
-  );
-
-  return results;
+  return [{ status: 'failed', name: entry.name, command, exitCode, stdout, stderr }];
 };
 
 export const runChecks = async (
-  checks: ReadonlyMap<string, CheckConfig>,
+  entries: readonly CheckEntry[],
   changedFiles: readonly string[],
   cwd: string,
 ): Promise<readonly CheckResult[]> => {
-  const entries = [...checks.entries()];
-
   const results = await Promise.allSettled(
-    entries.map(([name, check]) => runSingleCheck(name, check, changedFiles, cwd)),
+    entries.map((entry) => runSingleCheckEntry(entry, changedFiles, cwd)),
   );
 
   return results.flatMap((result, i) => {
@@ -154,9 +103,8 @@ export const runChecks = async (
     return [
       {
         status: 'failed',
-        name: entry[0],
-        group: entry[1].group,
-        command: entry[1].command,
+        name: entry.name,
+        command: entry.command,
         exitCode: 1,
         stdout: '',
         stderr: result.reason instanceof Error ? result.reason.message : String(result.reason),
@@ -165,53 +113,205 @@ export const runChecks = async (
   });
 };
 
-// -- Dry run --
+// -- Review execution --
+
+const runReviewWithFallbacks = async (
+  commands: readonly string[],
+  cwd: string,
+  name: string,
+): Promise<ReviewResult> => {
+  for (const command of commands) {
+    const { exitCode, stdout, stderr } = await runCommand(command, cwd);
+    if (exitCode === 0) {
+      return { status: 'completed', name, command, stdout };
+    }
+    // Non-zero: try next fallback
+    if (command === commands[commands.length - 1]) {
+      // Last command failed
+      return { status: 'failed', name, command, exitCode, stdout, stderr };
+    }
+  }
+  // Should not reach here, but satisfy type checker
+  return {
+    status: 'failed',
+    name,
+    command: commands[commands.length - 1] ?? '',
+    exitCode: 1,
+    stdout: '',
+    stderr: 'No commands to execute',
+  };
+};
+
+const runSingleReviewEntry = async (
+  entry: ReviewEntry,
+  changedFiles: readonly string[],
+  cwd: string,
+  diffSummary: string,
+): Promise<readonly ReviewResult[]> => {
+  const matched = matchFiles(changedFiles, entry.match, cwd, entry.exclude);
+
+  if (matched.length === 0) {
+    return [{ status: 'skip', name: entry.name }];
+  }
+
+  const allFiles = matched.map((m) => m.file);
+  const matchGroups = matched[0]?.groups ?? {};
+
+  const ctx: Record<string, string> = {
+    DIFF_SUMMARY: diffSummary,
+    CHANGED_FILES: formatFileList(allFiles, cwd),
+  };
+
+  const baseContext = template.buildContext({ match: matchGroups, ctx });
+
+  // Resolve vars (can reference env, match, ctx)
+  const resolvedVars = entry.vars ? template.resolveVars(entry.vars, baseContext) : {};
+
+  const fullContext = template.buildContext({
+    match: matchGroups,
+    ctx,
+    vars: resolvedVars,
+  });
+
+  // Build command list: primary + fallbacks
+  const commands = [entry.command, ...(entry.fallbacks ?? [])].map((cmd) =>
+    template.resolve(cmd, fullContext),
+  );
+
+  const result = await runReviewWithFallbacks(commands, cwd, entry.name);
+  return [result];
+};
+
+export const runReviews = async (
+  entries: readonly ReviewEntry[],
+  changedFiles: readonly string[],
+  cwd: string,
+  diffSummary: string,
+): Promise<readonly ReviewResult[]> => {
+  const results = await Promise.allSettled(
+    entries.map((entry) => runSingleReviewEntry(entry, changedFiles, cwd, diffSummary)),
+  );
+
+  return results.flatMap((result, i) => {
+    if (result.status === 'fulfilled') {
+      return result.value;
+    }
+    const entry = entries[i];
+    if (!entry) {
+      throw new Error(`Unexpected missing entry at index ${i}`);
+    }
+    return [
+      {
+        status: 'failed',
+        name: entry.name,
+        command: entry.command,
+        exitCode: 1,
+        stdout: '',
+        stderr: result.reason instanceof Error ? result.reason.message : String(result.reason),
+      } satisfies ReviewResult,
+    ];
+  });
+};
+
+// -- Dry run (checks) --
 
 export const dryRunChecks = (
-  checks: ReadonlyMap<string, CheckConfig>,
+  entries: readonly CheckEntry[],
   changedFiles: readonly string[],
   cwd: string,
 ): void => {
-  for (const [name, check] of checks) {
-    if (hasNamedGroups(check.pattern)) {
-      const grouped = matchAndGroupFiles(changedFiles, check.pattern, cwd);
-      if (grouped.size === 0) {
-        log(`  [skip] ${name} (no matching files)`);
-        continue;
-      }
-      for (const [groupKey, entry] of grouped) {
-        const checkName = `${name}[${groupKey}]`;
-        const command = buildCommand(
-          check.command,
-          entry.files,
-          check.changedFiles,
-          cwd,
-          entry.groups,
-        );
-        if (command === null) {
-          log(`  [skip] ${checkName} (no matching files)`);
-        } else {
-          log(`  [run]  ${checkName}`);
-          log(`         $ ${command}`);
-        }
-      }
-    } else {
-      const matched = matchFiles(changedFiles, check.pattern, cwd);
-      const command = buildCommand(check.command, matched, check.changedFiles, cwd);
+  for (const entry of entries) {
+    const matched = matchFiles(changedFiles, entry.match, cwd, entry.exclude);
 
-      if (command === null) {
-        log(`  [skip] ${name} (no matching files)`);
-      } else {
-        log(`  [run]  ${name}`);
+    if (matched.length === 0) {
+      log(`  [skip] ${entry.name} (no matching files)`);
+      continue;
+    }
+
+    if (hasNamedGroups(entry.match)) {
+      const grouped = groupMatchResults(matched);
+      for (const [groupKey, group] of grouped) {
+        const checkName = groupKey ? `${entry.name}[${groupKey}]` : entry.name;
+        const ctx = { CHANGED_FILES: formatFileList(group.files, cwd) };
+        const context = template.buildContext({ match: group.groups, ctx });
+        const command = template.resolve(entry.command, context);
+        log(`  [run]  ${checkName}`);
         log(`         $ ${command}`);
       }
+    } else {
+      const allFiles = matched.map((m) => m.file);
+      const ctx = { CHANGED_FILES: formatFileList(allFiles, cwd) };
+      const context = template.buildContext({ ctx });
+      const command = template.resolve(entry.command, context);
+      log(`  [run]  ${entry.name}`);
+      log(`         $ ${command}`);
     }
+  }
+};
+
+// -- Dry run (reviews) --
+
+export const dryRunReviews = (
+  entries: readonly ReviewEntry[],
+  changedFiles: readonly string[],
+  cwd: string,
+  diffSummary: string,
+): void => {
+  for (const entry of entries) {
+    const matched = matchFiles(changedFiles, entry.match, cwd, entry.exclude);
+
+    if (matched.length === 0) {
+      log(`${entry.name}: (no matching files)\n`);
+      continue;
+    }
+
+    const allFiles = matched.map((m) => m.file);
+    const matchGroups = matched[0]?.groups ?? {};
+    const ctx: Record<string, string> = {
+      DIFF_SUMMARY: diffSummary,
+      CHANGED_FILES: formatFileList(allFiles, cwd),
+    };
+
+    const baseContext = template.buildContext({ match: matchGroups, ctx });
+    const resolvedVars = entry.vars ? template.resolveVars(entry.vars, baseContext) : {};
+    const fullContext = template.buildContext({ match: matchGroups, ctx, vars: resolvedVars });
+
+    log(`${entry.name}:`);
+    log('');
+
+    log('  ctx:');
+    for (const [key, value] of Object.entries(ctx)) {
+      const lines = value.split('\n');
+      if (lines.length <= 5) {
+        log(`    ${key}: ${value}`);
+      } else {
+        log(`    ${key}: (${lines.length} lines)`);
+      }
+    }
+    log('');
+
+    if (entry.vars !== undefined) {
+      log('  vars:');
+      for (const [key, value] of Object.entries(resolvedVars)) {
+        log(`    ${key}: ${value}`);
+      }
+      log('');
+    }
+
+    const commands = [entry.command, ...(entry.fallbacks ?? [])].map((cmd) =>
+      template.resolve(cmd, fullContext),
+    );
+    for (const cmd of commands) {
+      log(`  $ ${cmd}`);
+    }
+
+    log('');
   }
 };
 
 // -- Report (text) --
 
-export const reportResults = (results: readonly CheckResult[]): boolean => {
+export const reportCheckResults = (results: readonly CheckResult[]): boolean => {
   const skipped = results.filter((r) => r.status === 'skip');
   const passed = results.filter((r) => r.status === 'passed');
   const failed = results.filter((r) => r.status === 'failed');
@@ -245,80 +345,41 @@ export const reportResults = (results: readonly CheckResult[]): boolean => {
   return true;
 };
 
-// -- Report (Claude Code hooks) --
-
-export const reportResultsHooks = (results: readonly CheckResult[]): boolean => {
+export const reportReviewResults = (results: readonly ReviewResult[]): boolean => {
+  const skipped = results.filter((r) => r.status === 'skip');
+  const completed = results.filter((r) => r.status === 'completed');
   const failed = results.filter((r) => r.status === 'failed');
 
-  if (failed.length === 0) {
-    return true;
+  for (const r of completed) {
+    log(`\n── ${r.name} ──`);
+    if (r.stdout) log(r.stdout.trimEnd());
   }
 
-  const failureDetails = failed
-    .map((r) => {
-      const lines = [`── ${r.name} ($ ${r.command}) ──`];
-      if (r.stdout) lines.push(r.stdout.trimEnd());
-      if (r.stderr) lines.push(r.stderr.trimEnd());
-      return lines.join('\n');
-    })
-    .join('\n\n');
-
-  const passed = results.filter((r) => r.status === 'passed').length;
-  const skipped = results.filter((r) => r.status === 'skip').length;
-  const summary = `${passed} passed, ${failed.length} failed, ${skipped} skipped`;
-
-  const reason = [
-    'check-changed blocked: checks failed. Fix the errors below and try again.',
-    '',
-    failureDetails,
-    '',
-    summary,
-  ].join('\n');
-
-  const output = { decision: 'block', reason };
-  log(JSON.stringify(output));
-
-  return false;
-};
-
-// -- Report (JSON) --
-
-export const reportResultsJson = (results: readonly CheckResult[]): boolean => {
-  const checks = results.map((r) => {
-    switch (r.status) {
-      case 'skip':
-        return { name: r.name, group: r.group, status: r.status };
-      case 'passed':
-        return { name: r.name, group: r.group, status: r.status, command: r.command };
-      case 'failed':
-        return {
-          name: r.name,
-          group: r.group,
-          status: r.status,
-          command: r.command,
-          exitCode: r.exitCode,
-          stdout: r.stdout,
-          stderr: r.stderr,
-        };
-      default: {
-        const _exhaustive: never = r;
-        throw new Error(`Unexpected status: ${JSON.stringify(_exhaustive)}`);
-      }
+  if (failed.length > 0) {
+    for (const r of failed) {
+      logError(`\n── ${r.name} (failed) ──`);
+      if (r.stdout) logError(r.stdout.trimEnd());
+      if (r.stderr) logError(r.stderr.trimEnd());
     }
-  });
+  }
 
-  const hasFailed = results.some((r) => r.status === 'failed');
+  log('');
 
-  const output = {
-    status: hasFailed ? 'failed' : 'passed',
-    summary: {
-      passed: results.filter((r) => r.status === 'passed').length,
-      failed: results.filter((r) => r.status === 'failed').length,
-      skipped: results.filter((r) => r.status === 'skip').length,
-    },
-    checks,
-  };
+  for (const r of skipped) {
+    log(`  - ${r.name} [skipped]`);
+  }
+  for (const r of completed) {
+    log(`  ✓ ${r.name} [completed]`);
+  }
+  for (const r of failed) {
+    log(`  ✗ ${r.name} [failed]`);
+  }
 
-  log(JSON.stringify(output, null, 2));
-  return !hasFailed;
+  if (failed.length > 0) {
+    log(`\n${completed.length} completed, ${failed.length} failed, ${skipped.length} skipped`);
+    return false;
+  }
+
+  log(`\n${completed.length} completed, ${skipped.length} skipped`);
+  return true;
 };

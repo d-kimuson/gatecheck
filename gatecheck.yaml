@@ -1,0 +1,35 @@
+checks:
+  - name: oxfmt
+    match: '\.(m|c)?(j|t)sx?$'
+    group: format
+    command: 'pnpm exec oxfmt --write --no-error-on-unmatched-pattern {{ ctx.CHANGED_FILES }}'
+
+  - name: oxlint
+    match: '\.(m|c)?(j|t)sx?$'
+    group: lint
+    command: 'pnpm exec oxlint --type-aware --fix {{ ctx.CHANGED_FILES }}'
+
+  - name: typecheck
+    match: '\.(m|c)?tsx?$'
+    group: typecheck
+    command: 'pnpm exec tsc --noEmit'
+
+  - name: vitest
+    match: '\.(m|c)?(j|t)sx?$'
+    group: test
+    command: 'pnpm exec vitest related --run --passWithNoTests {{ ctx.CHANGED_FILES }}'
+
+reviews:
+  - name: architect-review
+    match: 'src/.*'
+    exclude: '**/*.test.{ts,tsx,js,jsx}'
+    vars:
+      prompt: |
+        変更ファイル: {{ ctx.CHANGED_FILES }}
+
+        あなたは専門的なソフトウェアアーキテクトです。
+        上記の変更内容をレビューしてください。
+        設計上の問題、バグのリスク、改善点があれば指摘してください。
+    command: "codex exec --sandbox 'workspace-write' '{{ vars.prompt }}'"
+    fallbacks:
+      - "claude --permission-mode 'auto' -p '{{ vars.prompt }}'"

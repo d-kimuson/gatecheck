@@ -2,7 +2,7 @@
 
 ## 0.0.1-beta.4
 
-*No significant changes*
+_No significant changes_
 
 ##### &nbsp;&nbsp;&nbsp;&nbsp;[View changes on GitHub](https://github.com/d-kimuson/check-changed/compare/v0.0.1-beta.3...0.0.1-beta.4)
 

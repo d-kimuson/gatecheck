@@ -1,32 +1,36 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import * as v from 'valibot';
+import { parse as parseYaml } from 'yaml';
 
 // -- Schema --
 
-const ChangedFilesConfigSchema = v.object({
-  separator: v.optional(v.string()),
-  path: v.optional(v.picklist(['relative', 'absolute'])),
-});
-
-const CheckConfigSchema = v.object({
-  pattern: v.string(),
-  command: v.string(),
+const CheckEntrySchema = v.object({
+  name: v.string(),
+  match: v.string(),
+  exclude: v.optional(v.string()),
   group: v.string(),
-  changedFiles: v.optional(ChangedFilesConfigSchema),
+  command: v.string(),
 });
 
-export const ConfigSchema = v.object({
-  defaults: v.object({
-    changed: v.string(),
-    target: v.string(),
-  }),
-  checks: v.record(v.string(), CheckConfigSchema),
+const ReviewEntrySchema = v.object({
+  name: v.string(),
+  match: v.string(),
+  exclude: v.optional(v.string()),
+  vars: v.optional(v.record(v.string(), v.string())),
+  prompt: v.optional(v.string()),
+  command: v.string(),
+  fallbacks: v.optional(v.array(v.string())),
+});
+
+export const GatecheckConfigSchema = v.object({
+  checks: v.optional(v.array(CheckEntrySchema)),
+  reviews: v.optional(v.array(ReviewEntrySchema)),
 });
 
 // -- Config file path --
 
-const CONFIG_FILENAME = '.check-changedrc.json';
+const CONFIG_FILENAME = 'gatecheck.yaml';
 
 export const resolveConfigPath = (cwd: string): string => resolve(cwd, CONFIG_FILENAME);
 
@@ -34,12 +38,14 @@ export const resolveConfigPath = (cwd: string): string => resolve(cwd, CONFIG_FI
 
 export class ConfigNotFoundError extends Error {
   constructor(configPath: string) {
-    super(`Config file not found: ${configPath}\nRun \`check-changed setup\` to create one.`);
+    super(`Config file not found: ${configPath}\nRun \`gatecheck setup\` to create one.`);
     this.name = 'ConfigNotFoundError';
   }
 }
 
-export const loadConfig = async (cwd: string): Promise<v.InferOutput<typeof ConfigSchema>> => {
+export const loadConfig = async (
+  cwd: string,
+): Promise<v.InferOutput<typeof GatecheckConfigSchema>> => {
   const configPath = resolveConfigPath(cwd);
   let raw: string;
   try {
@@ -50,6 +56,6 @@ export const loadConfig = async (cwd: string): Promise<v.InferOutput<typeof Conf
     }
     throw err;
   }
-  const json: unknown = JSON.parse(raw);
-  return v.parse(ConfigSchema, json);
+  const parsed: unknown = parseYaml(raw);
+  return v.parse(GatecheckConfigSchema, parsed);
 };

@@ -57,6 +57,28 @@ const describeSource = (source: ChangedSource): string => {
   }
 };
 
+// Get diff summary for review context
+export const getDiffSummary = async (
+  sources: readonly ChangedSource[],
+  cwd: string,
+): Promise<string> => {
+  const results = await Promise.all(
+    sources.map(async (source) => {
+      const baseArgs = gitCommandForSource(source);
+      // Remove --name-only to get full diff, but keep --diff-filter=d
+      const args = baseArgs.filter((a) => a !== '--name-only');
+      try {
+        return await exec('git', args, cwd);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        throw new Error(`Failed to get diff for ${describeSource(source)}: ${detail}`);
+      }
+    }),
+  );
+
+  return results.filter((r) => r.trim().length > 0).join('\n');
+};
+
 export const getChangedFiles = async (
   sources: readonly ChangedSource[],
   cwd: string,

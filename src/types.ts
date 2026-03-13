@@ -1,6 +1,3 @@
-import type * as v from 'valibot';
-import type { ConfigSchema } from './config.ts';
-
 // -- ChangedSource ADT --
 
 export type ChangedSource =
@@ -12,32 +9,60 @@ export type ChangedSource =
 
 // -- Config --
 
-export type CheckConfig = {
-  readonly pattern: string;
-  readonly command: string;
+export type CheckEntry = {
+  readonly name: string;
+  readonly match: string;
+  readonly exclude?: string;
   readonly group: string;
-  readonly changedFiles?: {
-    readonly separator?: string;
-    readonly path?: 'relative' | 'absolute';
-  };
+  readonly command: string;
 };
 
-export type Config = v.InferOutput<typeof ConfigSchema>;
+export type ReviewEntry = {
+  readonly name: string;
+  readonly match: string;
+  readonly exclude?: string;
+  readonly vars?: Readonly<Record<string, string>>;
+  readonly prompt?: string;
+  readonly command: string;
+  readonly fallbacks?: readonly string[];
+};
+
+export type GatecheckConfig = {
+  readonly checks?: readonly CheckEntry[];
+  readonly reviews?: readonly ReviewEntry[];
+};
 
 // -- Check Result ADT --
 
 export type CheckResult =
-  | { readonly status: 'skip'; readonly name: string; readonly group: string }
+  | { readonly status: 'skip'; readonly name: string }
   | {
       readonly status: 'passed';
       readonly name: string;
-      readonly group: string;
       readonly command: string;
     }
   | {
       readonly status: 'failed';
       readonly name: string;
-      readonly group: string;
+      readonly command: string;
+      readonly exitCode: number;
+      readonly stdout: string;
+      readonly stderr: string;
+    };
+
+// -- Review Result ADT --
+
+export type ReviewResult =
+  | { readonly status: 'skip'; readonly name: string }
+  | {
+      readonly status: 'completed';
+      readonly name: string;
+      readonly command: string;
+      readonly stdout: string;
+    }
+  | {
+      readonly status: 'failed';
+      readonly name: string;
       readonly command: string;
       readonly exitCode: number;
       readonly stdout: string;

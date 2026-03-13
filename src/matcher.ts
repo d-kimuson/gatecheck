@@ -1,76 +1,61 @@
-import { relative } from 'node:path';
+import { matchesGlob, relative } from 'node:path';
+
+export type MatchResult = {
+  readonly file: string;
+  readonly groups: Readonly<Record<string, string>>;
+};
 
 export const matchFiles = (
   files: readonly string[],
-  pattern: string,
+  match: string,
   cwd: string,
-): readonly string[] => {
-  const regex = new RegExp(pattern);
-  return files.filter((file) => {
-    const rel = relative(cwd, file);
-    return regex.test(rel);
-  });
-};
+  exclude?: string,
+): readonly MatchResult[] => {
+  const matchRegex = new RegExp(match);
 
-type GroupEntry = {
-  readonly groups: Record<string, string>;
-  readonly files: string[];
-};
-
-const getNamedGroupKeys = (pattern: string): readonly string[] => {
-  const namedGroupRegex = /\(\?<([^>]+)>/g;
-  const keys: string[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = namedGroupRegex.exec(pattern)) !== null) {
-    const key = m[1];
-    if (key !== undefined) {
-      keys.push(key);
-    }
-  }
-  return keys;
-};
-
-export const matchAndGroupFiles = (
-  files: readonly string[],
-  pattern: string,
-  cwd: string,
-): Map<string, GroupEntry> => {
-  const regex = new RegExp(pattern);
-  const groupKeys = getNamedGroupKeys(pattern);
-  const hasNamedGroups = groupKeys.length > 0;
-  const result = new Map<string, GroupEntry>();
+  const results: MatchResult[] = [];
 
   for (const file of files) {
     const rel = relative(cwd, file);
-    const match = regex.exec(rel);
-    if (!match) continue;
-
-    if (!hasNamedGroups) {
-      const existing = result.get('');
-      if (existing) {
-        existing.files.push(file);
-      } else {
-        result.set('', { groups: {}, files: [file] });
-      }
-      continue;
-    }
+    if (exclude !== undefined && matchesGlob(rel, exclude)) continue;
+    const m = matchRegex.exec(rel);
+    if (!m) continue;
 
     const groups: Record<string, string> = {};
-    const keyParts: string[] = [];
-    for (const key of groupKeys) {
-      const value = match.groups?.[key] ?? '';
-      groups[key] = value;
-      keyParts.push(value);
+    if (m.groups) {
+      for (const [key, value] of Object.entries(m.groups)) {
+        if (value !== undefined) {
+          groups[key] = value;
+        }
+      }
     }
-    const groupKey = keyParts.join('/');
 
-    const existing = result.get(groupKey);
+    results.push({ file, groups });
+  }
+
+  return results;
+};
+
+// Group matched files by named capture group values
+export const groupMatchResults = (
+  results: readonly MatchResult[],
+): ReadonlyMap<
+  string,
+  { readonly groups: Readonly<Record<string, string>>; readonly files: readonly string[] }
+> => {
+  const map = new Map<string, { groups: Readonly<Record<string, string>>; files: string[] }>();
+
+  for (const result of results) {
+    const keyParts = Object.values(result.groups);
+    const key = keyParts.length > 0 ? keyParts.join('/') : '';
+
+    const existing = map.get(key);
     if (existing) {
-      existing.files.push(file);
+      existing.files.push(result.file);
     } else {
-      result.set(groupKey, { groups, files: [file] });
+      map.set(key, { groups: result.groups, files: [result.file] });
     }
   }
 
-  return result;
+  return map;
 };

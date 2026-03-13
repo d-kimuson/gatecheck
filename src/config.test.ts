@@ -3,54 +3,47 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as v from 'valibot';
 import { describe, test, expect, beforeEach, afterEach } from 'vitest';
-import { loadConfig, resolveConfigPath, ConfigSchema } from './config.ts';
+import { loadConfig, resolveConfigPath, GatecheckConfigSchema } from './config.ts';
 
 describe('resolveConfigPath', () => {
-  test('resolves .check-changedrc.json in given directory', () => {
-    expect(resolveConfigPath('/foo/bar')).toBe('/foo/bar/.check-changedrc.json');
+  test('resolves gatecheck.yaml in given directory', () => {
+    expect(resolveConfigPath('/foo/bar')).toBe('/foo/bar/gatecheck.yaml');
   });
 });
 
-describe('ConfigSchema', () => {
-  test('validates a valid config', () => {
+describe('GatecheckConfigSchema', () => {
+  test('validates a valid config with checks', () => {
     const input = {
-      defaults: { changed: 'staged', target: 'all' },
-      checks: {
-        lint: { pattern: '**/*.ts', command: 'eslint', group: 'lint' },
-      },
+      checks: [{ name: 'lint', match: '\\.ts$', group: 'lint', command: 'eslint' }],
     };
-    expect(() => v.parse(ConfigSchema, input)).not.toThrow();
+    expect(() => v.parse(GatecheckConfigSchema, input)).not.toThrow();
   });
 
-  test('rejects missing defaults', () => {
-    const input = { checks: {} };
-    expect(() => v.parse(ConfigSchema, input)).toThrow(/defaults/i);
-  });
-
-  test('rejects missing required check fields', () => {
+  test('validates a valid config with reviews', () => {
     const input = {
-      defaults: { changed: 'staged', target: 'all' },
-      checks: {
-        lint: { pattern: '**/*.ts' },
-      },
-    };
-    expect(() => v.parse(ConfigSchema, input)).toThrow(/command/i);
-  });
-
-  test('accepts optional changedFiles config', () => {
-    const input = {
-      defaults: { changed: 'staged', target: 'all' },
-      checks: {
-        lint: {
-          pattern: '**/*.ts',
-          command: 'eslint {{CHANGED_FILES}}',
-          group: 'lint',
-          changedFiles: { separator: ',', path: 'relative' },
+      reviews: [
+        {
+          name: 'architect',
+          match: 'src/.*',
+          vars: { prompt: '{{ ctx.DIFF_SUMMARY }}' },
+          command: 'codex -p "{{ vars.prompt }}"',
+          fallbacks: ['claude -p "{{ vars.prompt }}"'],
         },
-      },
+      ],
     };
-    const result = v.parse(ConfigSchema, input);
-    expect(result.checks['lint']?.changedFiles).toEqual({ separator: ',', path: 'relative' });
+    expect(() => v.parse(GatecheckConfigSchema, input)).not.toThrow();
+  });
+
+  test('accepts empty config', () => {
+    const input = {};
+    expect(() => v.parse(GatecheckConfigSchema, input)).not.toThrow();
+  });
+
+  test('rejects check entry missing required fields', () => {
+    const input = {
+      checks: [{ name: 'lint', match: '\\.ts$' }],
+    };
+    expect(() => v.parse(GatecheckConfigSchema, input)).toThrow(/Invalid/i);
   });
 });
 
@@ -58,32 +51,29 @@ describe('loadConfig', () => {
   let dir: string;
 
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'check-changed-test-'));
+    dir = await mkdtemp(join(tmpdir(), 'gatecheck-test-'));
   });
 
   afterEach(async () => {
     await rm(dir, { recursive: true });
   });
 
-  test('loads and validates a config file', async () => {
-    const config = {
-      defaults: { changed: 'staged', target: 'all' },
-      checks: {
-        typecheck: { pattern: '**/*.ts', command: 'tsc --noEmit', group: 'typecheck' },
-      },
-    };
-    await writeFile(join(dir, '.check-changedrc.json'), JSON.stringify(config));
+  test('loads and validates a YAML config file', async () => {
+    const yaml = `
+checks:
+  - name: lint
+    match: '\\.ts$'
+    group: lint
+    command: eslint
+`;
+    await writeFile(join(dir, 'gatecheck.yaml'), yaml);
 
     const result = await loadConfig(dir);
-    expect(result).toEqual(config);
+    expect(result.checks).toHaveLength(1);
+    expect(result.checks?.[0]?.name).toBe('lint');
   });
 
   test('throws ConfigNotFoundError on missing file', async () => {
     await expect(loadConfig(dir)).rejects.toThrow(/Config file not found/);
-  });
-
-  test('throws on invalid JSON structure', async () => {
-    await writeFile(join(dir, '.check-changedrc.json'), '{"invalid": true}');
-    await expect(loadConfig(dir)).rejects.toThrow(/defaults/i);
   });
 });

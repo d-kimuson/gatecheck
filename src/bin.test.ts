@@ -30,35 +30,28 @@ const runCli = async (
   }
 };
 
-describe('check-changed CLI', () => {
+describe('gatecheck CLI', () => {
   let dir: string;
 
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'check-changed-bin-'));
-    await writeFile(
-      join(dir, '.check-changedrc.json'),
-      JSON.stringify({
-        defaults: { changed: 'untracked', target: 'all' },
-        checks: {
-          echo: {
-            pattern: '.*',
-            command: 'echo {{CHANGED_FILES}}',
-            group: 'test',
-          },
-        },
-      }),
-    );
+    dir = await mkdtemp(join(tmpdir(), 'gatecheck-bin-'));
   });
 
   afterEach(async () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  test('rejects non-text formats in dry-run mode', async () => {
-    const result = await runCli(dir, ['run', '--dry-run', '--format', 'json']);
-
+  test('check command shows error when no config file', async () => {
+    const result = await runCli(dir, ['check']);
     expect(result.code).toBe(1);
-    expect(result.stdout).toBe('');
-    expect(result.stderr).toContain('--dry-run can only be used with --format text');
+    expect(result.stderr).toContain('Config file not found');
+  });
+
+  test('check command reports no checks when config has none', async () => {
+    const yaml = `checks: []\n`;
+    await writeFile(join(dir, 'gatecheck.yaml'), yaml);
+    const result = await runCli(dir, ['check']);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain('No checks configured');
   });
 });
