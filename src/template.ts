@@ -51,8 +51,20 @@ export const resolveVars = (
 export const resolve = (template: string, context: TemplateContext): string =>
   resolveTemplate(template, context);
 
+// Resolve template with auto-shell-escaping for vars scope.
+// Use this when substituting vars into shell command strings.
+export const resolveCommand = (template: string, context: TemplateContext): string =>
+  template.replaceAll(TEMPLATE_PATTERN, (original, scope: string, key: string) => {
+    const value = lookupValue(scope, key, context);
+    if (value === undefined) return original;
+    return scope === 'vars' ? shellEscape(value) : value;
+  });
+
 // eslint-disable-next-line node/no-process-env -- env access is intentional for template resolution
 const getEnv = (): Readonly<Record<string, string | undefined>> => process.env;
+
+// Shell-safe escaping using single quotes (POSIX-compliant)
+export const shellEscape = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
 
 export const buildContext = (overrides: {
   match?: Readonly<Record<string, string>>;

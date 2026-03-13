@@ -45,6 +45,39 @@ describe('GatecheckConfigSchema', () => {
     };
     expect(() => v.parse(GatecheckConfigSchema, input)).toThrow(/Invalid/i);
   });
+
+  test('validates config with defaults', () => {
+    const input = {
+      defaults: {
+        changed: 'staged',
+        target: 'lint,test',
+      },
+      checks: [{ name: 'lint', match: '\\.ts$', group: 'lint', command: 'eslint' }],
+    };
+    expect(() => v.parse(GatecheckConfigSchema, input)).not.toThrow();
+  });
+
+  test('validates config with partial defaults', () => {
+    const input = {
+      defaults: { changed: 'branch:main' },
+    };
+    expect(() => v.parse(GatecheckConfigSchema, input)).not.toThrow();
+  });
+
+  test('validates check entry with changedFiles options', () => {
+    const input = {
+      checks: [
+        {
+          name: 'lint',
+          match: '\\.ts$',
+          group: 'lint',
+          command: 'eslint {{ ctx.CHANGED_FILES }}',
+          changedFiles: { separator: '\\n', path: 'absolute' },
+        },
+      ],
+    };
+    expect(() => v.parse(GatecheckConfigSchema, input)).not.toThrow();
+  });
 });
 
 describe('loadConfig', () => {

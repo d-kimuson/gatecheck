@@ -5,12 +5,18 @@ import { parse as parseYaml } from 'yaml';
 
 // -- Schema --
 
+const ChangedFilesSchema = v.object({
+  separator: v.optional(v.string()),
+  path: v.optional(v.picklist(['relative', 'absolute'])),
+});
+
 const CheckEntrySchema = v.object({
   name: v.string(),
   match: v.string(),
   exclude: v.optional(v.string()),
   group: v.string(),
   command: v.string(),
+  changedFiles: v.optional(ChangedFilesSchema),
 });
 
 const ReviewEntrySchema = v.object({
@@ -23,7 +29,13 @@ const ReviewEntrySchema = v.object({
   fallbacks: v.optional(v.array(v.string())),
 });
 
+const DefaultsSchema = v.object({
+  changed: v.optional(v.string()),
+  target: v.optional(v.string()),
+});
+
 export const GatecheckConfigSchema = v.object({
+  defaults: v.optional(DefaultsSchema),
   checks: v.optional(v.array(CheckEntrySchema)),
   reviews: v.optional(v.array(ReviewEntrySchema)),
 });

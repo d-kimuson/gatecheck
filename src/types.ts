@@ -15,6 +15,10 @@ export type CheckEntry = {
   readonly exclude?: string;
   readonly group: string;
   readonly command: string;
+  readonly changedFiles?: {
+    readonly separator?: string;
+    readonly path?: 'relative' | 'absolute';
+  };
 };
 
 export type ReviewEntry = {
@@ -28,6 +32,10 @@ export type ReviewEntry = {
 };
 
 export type GatecheckConfig = {
+  readonly defaults?: {
+    readonly changed?: string;
+    readonly target?: string;
+  };
   readonly checks?: readonly CheckEntry[];
   readonly reviews?: readonly ReviewEntry[];
 };

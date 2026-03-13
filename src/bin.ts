@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import pkg from '../package.json' with { type: 'json' };
 import { loadConfig, ConfigNotFoundError } from './config.ts';
 import { getChangedFiles, getDiffSummary } from './git.ts';
@@ -11,6 +11,8 @@ import {
   dryRunChecks,
   dryRunReviews,
   reportCheckResults,
+  reportCheckResultsJson,
+  reportCheckResultsHooks,
   reportReviewResults,
 } from './runner.ts';
 import type { ChangedSource } from './types.ts';
@@ -59,34 +61,61 @@ const filterByTarget = <T extends { readonly group: string }>(
   return entries.filter((e) => groups.includes(e.group));
 };
 
+// -- Output format --
+
+type OutputFormat = 'text' | 'json' | 'claude-code-hooks' | 'copilot-cli-hooks';
+
+const parseFormat = (raw: string | undefined): OutputFormat => {
+  if (raw === 'json') return 'json';
+  if (raw === 'claude-code-hooks') return 'claude-code-hooks';
+  if (raw === 'copilot-cli-hooks') return 'copilot-cli-hooks';
+  return 'text';
+};
+
 // -- check command --
 
 type CheckOpts = {
   changed?: string;
   target?: string;
   dryRun?: boolean;
+  format?: string;
 };
 
 const check = async (opts: CheckOpts): Promise<void> => {
   const cwd = process.cwd();
+  const fmt = parseFormat(opts.format);
   const config = await loadConfig(cwd);
-  const entries = filterByTarget(config.checks ?? [], opts.target);
+
+  if (opts.dryRun === true && fmt !== 'text') {
+    throw new Error('--dry-run can only be used with --format text');
+  }
+
+  const entries = filterByTarget(config.checks ?? [], opts.target ?? config.defaults?.target);
 
   if (entries.length === 0) {
-    log('No checks configured.');
+    if (fmt === 'text') log('No checks configured.');
+    if (fmt === 'json') log(JSON.stringify(reportCheckResultsJson([])));
+    if (fmt === 'claude-code-hooks' || fmt === 'copilot-cli-hooks') {
+      // No checks = no block
+    }
     return;
   }
 
   const changedSources =
-    opts.changed !== undefined ? parseChangedSources(opts.changed) : DEFAULT_SOURCES;
+    opts.changed !== undefined
+      ? parseChangedSources(opts.changed)
+      : config.defaults?.changed !== undefined
+        ? parseChangedSources(config.defaults.changed)
+        : DEFAULT_SOURCES;
   const changedFiles = await getChangedFiles(changedSources, cwd);
 
   if (changedFiles.length === 0) {
-    log('No changed files found.');
+    if (fmt === 'text') log('No changed files found.');
+    if (fmt === 'json') log(JSON.stringify(reportCheckResultsJson([])));
     return;
   }
 
-  log(`Found ${changedFiles.length} changed file(s).`);
+  if (fmt === 'text') log(`Found ${changedFiles.length} changed file(s).`);
 
   if (opts.dryRun === true) {
     log('');
@@ -94,13 +123,35 @@ const check = async (opts: CheckOpts): Promise<void> => {
     return;
   }
 
-  log(`Running ${entries.length} check(s)...`);
+  if (fmt === 'text') log(`Running ${entries.length} check(s)...`);
 
   const results = await runChecks(entries, changedFiles, cwd);
-  const allPassed = reportCheckResults(results);
 
-  if (!allPassed) {
-    process.exitCode = 1;
+  switch (fmt) {
+    case 'text': {
+      const allPassed = reportCheckResults(results);
+      if (!allPassed) process.exitCode = 1;
+      break;
+    }
+    case 'json': {
+      const output = reportCheckResultsJson(results);
+      log(JSON.stringify(output, null, 2));
+      if (output.status === 'failed') process.exitCode = 1;
+      break;
+    }
+    case 'claude-code-hooks':
+    case 'copilot-cli-hooks': {
+      const output = reportCheckResultsHooks(results);
+      if (output !== null) {
+        log(JSON.stringify(output));
+        process.exitCode = 1;
+      }
+      break;
+    }
+    default: {
+      const _exhaustive: never = fmt;
+      throw new Error(`Unknown format: ${String(_exhaustive)}`);
+    }
   }
 };
 
@@ -122,7 +173,11 @@ const review = async (opts: ReviewOpts): Promise<void> => {
   }
 
   const changedSources =
-    opts.changed !== undefined ? parseChangedSources(opts.changed) : DEFAULT_SOURCES;
+    opts.changed !== undefined
+      ? parseChangedSources(opts.changed)
+      : config.defaults?.changed !== undefined
+        ? parseChangedSources(config.defaults.changed)
+        : DEFAULT_SOURCES;
   const changedFiles = await getChangedFiles(changedSources, cwd);
 
   if (changedFiles.length === 0) {
@@ -163,6 +218,14 @@ program
   )
   .option('-t, --target <groups>', 'Target groups (comma-separated or "all")')
   .option('-d, --dry-run', 'Show which checks would run without executing them')
+  .addOption(
+    new Option('-f, --format <format>', 'Output format').choices([
+      'text',
+      'json',
+      'claude-code-hooks',
+      'copilot-cli-hooks',
+    ]),
+  )
   .action(check);
 
 program
@@ -174,6 +237,15 @@ program
   )
   .option('-d, --dry-run', 'Show review configuration and matched files without executing')
   .action(review);
+
+program
+  .command('setup')
+  .description('Create or update gatecheck.yaml')
+  .option('--non-interactive', 'Skip prompts and use defaults with auto-detected presets')
+  .action(async (opts: { nonInteractive?: boolean }) => {
+    const { runSetup } = await import('./setup.ts');
+    await runSetup(process.cwd(), { nonInteractive: opts.nonInteractive });
+  });
 
 program.parseAsync().catch((error: unknown) => {
   if (error instanceof ConfigNotFoundError) {

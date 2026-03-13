@@ -34,8 +34,19 @@ const runCommand = (
 
 // -- Helpers --
 
-const formatFileList = (files: readonly string[], cwd: string): string =>
-  files.map((f) => `'${relative(cwd, f).replaceAll("'", "'\\''")}'`).join(' ');
+const formatFileList = (
+  files: readonly string[],
+  cwd: string,
+  changedFiles?: CheckEntry['changedFiles'],
+): string => {
+  const sep = changedFiles?.separator ?? ' ';
+  const resolved = changedFiles?.path === 'absolute' ? files : files.map((f) => relative(cwd, f));
+  return resolved.map((p) => template.shellEscape(p)).join(sep);
+};
+
+// Plain file list for review prompts (human-readable, no shell escaping)
+const formatFileListPlain = (files: readonly string[], cwd: string): string =>
+  files.map((f) => relative(cwd, f)).join(' ');
 
 const hasNamedGroups = (pattern: string): boolean => /\(\?<[^>]+>/.test(pattern);
 
@@ -57,7 +68,7 @@ const runSingleCheckEntry = async (
     const results = await Promise.all(
       [...grouped.entries()].map(async ([groupKey, group]): Promise<CheckResult> => {
         const checkName = groupKey ? `${entry.name}[${groupKey}]` : entry.name;
-        const ctx = { CHANGED_FILES: formatFileList(group.files, cwd) };
+        const ctx = { CHANGED_FILES: formatFileList(group.files, cwd, entry.changedFiles) };
         const context = template.buildContext({ match: group.groups, ctx });
         const command = template.resolve(entry.command, context);
 
@@ -72,7 +83,7 @@ const runSingleCheckEntry = async (
   }
 
   const allFiles = matched.map((m) => m.file);
-  const ctx = { CHANGED_FILES: formatFileList(allFiles, cwd) };
+  const ctx = { CHANGED_FILES: formatFileList(allFiles, cwd, entry.changedFiles) };
   const context = template.buildContext({ ctx });
   const command = template.resolve(entry.command, context);
 
@@ -159,7 +170,7 @@ const runSingleReviewEntry = async (
 
   const ctx: Record<string, string> = {
     DIFF_SUMMARY: diffSummary,
-    CHANGED_FILES: formatFileList(allFiles, cwd),
+    CHANGED_FILES: formatFileListPlain(allFiles, cwd),
   };
 
   const baseContext = template.buildContext({ match: matchGroups, ctx });
@@ -174,8 +185,9 @@ const runSingleReviewEntry = async (
   });
 
   // Build command list: primary + fallbacks
+  // resolveCommand auto-shell-escapes vars values
   const commands = [entry.command, ...(entry.fallbacks ?? [])].map((cmd) =>
-    template.resolve(cmd, fullContext),
+    template.resolveCommand(cmd, fullContext),
   );
 
   const result = await runReviewWithFallbacks(commands, cwd, entry.name);
@@ -269,7 +281,7 @@ export const dryRunReviews = (
     const matchGroups = matched[0]?.groups ?? {};
     const ctx: Record<string, string> = {
       DIFF_SUMMARY: diffSummary,
-      CHANGED_FILES: formatFileList(allFiles, cwd),
+      CHANGED_FILES: formatFileListPlain(allFiles, cwd),
     };
 
     const baseContext = template.buildContext({ match: matchGroups, ctx });
@@ -298,8 +310,9 @@ export const dryRunReviews = (
       log('');
     }
 
+    // resolveCommand auto-shell-escapes vars values
     const commands = [entry.command, ...(entry.fallbacks ?? [])].map((cmd) =>
-      template.resolve(cmd, fullContext),
+      template.resolveCommand(cmd, fullContext),
     );
     for (const cmd of commands) {
       log(`  $ ${cmd}`);
@@ -344,6 +357,96 @@ export const reportCheckResults = (results: readonly CheckResult[]): boolean => 
   log(`\n${passed.length} passed, ${skipped.length} skipped`);
   return true;
 };
+
+// -- Report (JSON) --
+
+export type CheckResultsJsonOutput = {
+  readonly status: 'passed' | 'failed';
+  readonly summary: {
+    readonly passed: number;
+    readonly failed: number;
+    readonly skipped: number;
+  };
+  readonly checks: readonly Record<string, unknown>[];
+};
+
+export const reportCheckResultsJson = (results: readonly CheckResult[]): CheckResultsJsonOutput => {
+  const passed = results.filter((r) => r.status === 'passed');
+  const failed = results.filter((r) => r.status === 'failed');
+  const skipped = results.filter((r) => r.status === 'skip');
+
+  const checks = results.map((r) => {
+    switch (r.status) {
+      case 'skip':
+        return { name: r.name, status: r.status };
+      case 'passed':
+        return { name: r.name, status: r.status, command: r.command };
+      case 'failed':
+        return {
+          name: r.name,
+          status: r.status,
+          command: r.command,
+          exitCode: r.exitCode,
+          stdout: r.stdout,
+          stderr: r.stderr,
+        };
+      default: {
+        const _exhaustive: never = r;
+        throw new Error(`Unexpected status: ${JSON.stringify(_exhaustive)}`);
+      }
+    }
+  });
+
+  return {
+    status: failed.length > 0 ? 'failed' : 'passed',
+    summary: {
+      passed: passed.length,
+      failed: failed.length,
+      skipped: skipped.length,
+    },
+    checks,
+  };
+};
+
+// -- Report (Claude Code / Copilot hooks) --
+
+export type HooksOutput = {
+  readonly decision: 'block';
+  readonly reason: string;
+};
+
+export const reportCheckResultsHooks = (results: readonly CheckResult[]): HooksOutput | null => {
+  const failed = results.filter((r) => r.status === 'failed');
+
+  if (failed.length === 0) {
+    return null;
+  }
+
+  const failureDetails = failed
+    .map((r) => {
+      const lines = [`── ${r.name} ($ ${r.command}) ──`];
+      if (r.stdout) lines.push(r.stdout.trimEnd());
+      if (r.stderr) lines.push(r.stderr.trimEnd());
+      return lines.join('\n');
+    })
+    .join('\n\n');
+
+  const passed = results.filter((r) => r.status === 'passed').length;
+  const skipped = results.filter((r) => r.status === 'skip').length;
+  const summary = `${passed} passed, ${failed.length} failed, ${skipped} skipped`;
+
+  const reason = [
+    'gatecheck blocked: checks failed. Fix the errors below and try again.',
+    '',
+    failureDetails,
+    '',
+    summary,
+  ].join('\n');
+
+  return { decision: 'block', reason };
+};
+
+// -- Report (review text) --
 
 export const reportReviewResults = (results: readonly ReviewResult[]): boolean => {
   const skipped = results.filter((r) => r.status === 'skip');

@@ -1,5 +1,12 @@
 import { describe, test, expect } from 'vitest';
-import { runChecks, runReviews, reportCheckResults, reportReviewResults } from './runner.ts';
+import {
+  runChecks,
+  runReviews,
+  reportCheckResults,
+  reportReviewResults,
+  reportCheckResultsJson,
+  reportCheckResultsHooks,
+} from './runner.ts';
 import type { CheckResult, ReviewResult } from './types.ts';
 
 describe('runChecks', () => {
@@ -79,6 +86,46 @@ describe('runChecks', () => {
     expect(results[0]?.status).toBe('passed');
     expect(JSON.stringify(results[0])).toContain('file.ts');
   });
+
+  test('uses absolute paths when changedFiles.path is absolute', async () => {
+    const entries = [
+      {
+        name: 'abs',
+        match: '.*',
+        group: 'test',
+        command: 'echo {{ ctx.CHANGED_FILES }}',
+        changedFiles: { path: 'absolute' } as const,
+      },
+    ];
+    const results = await runChecks(entries, ['/tmp/file.ts'], cwd);
+    expect(results).toHaveLength(1);
+    expect(results[0]?.status).toBe('passed');
+    expect(JSON.stringify(results[0])).toContain('/tmp/file.ts');
+  });
+
+  test('uses custom separator when changedFiles.separator is set', async () => {
+    const entries = [
+      {
+        name: 'sep',
+        match: '.*',
+        group: 'test',
+        command: 'printf "%s" {{ ctx.CHANGED_FILES }}',
+        changedFiles: { separator: ',' },
+      },
+    ];
+    const results = await runChecks(entries, ['/tmp/a.ts', '/tmp/b.ts'], cwd);
+    expect(results).toHaveLength(1);
+    expect(JSON.stringify(results[0])).toContain("'a.ts','b.ts'");
+  });
+
+  test('handles files with single quotes in path', async () => {
+    const entries = [
+      { name: 'quote', match: '.*', group: 'test', command: 'echo {{ ctx.CHANGED_FILES }}' },
+    ];
+    const results = await runChecks(entries, ["/tmp/it's.ts"], cwd);
+    expect(results).toHaveLength(1);
+    expect(results[0]?.status).toBe('passed');
+  });
 });
 
 describe('runReviews', () => {
@@ -144,6 +191,40 @@ describe('runReviews', () => {
     expect(results[0]?.status).toBe('completed');
     expect(JSON.stringify(results[0])).toContain('hello');
   });
+
+  test('auto-shell-escapes vars in command', async () => {
+    const entries = [
+      {
+        name: 'review',
+        match: '.*',
+
+        vars: { msg: "it's working" },
+        command: 'echo {{ vars.msg }}',
+      },
+    ];
+    const results = await runReviews(entries, ['/tmp/file.ts'], cwd, 'diff');
+    expect(results).toHaveLength(1);
+    // Shell correctly interprets the escaped single quote
+    expect(results[0]?.status).toBe('completed');
+    expect(JSON.stringify(results[0])).toContain("it's working");
+  });
+
+  test('CHANGED_FILES in review is plain (not shell-escaped)', async () => {
+    const entries = [
+      {
+        name: 'review',
+        match: '.*',
+
+        vars: { prompt: 'files: {{ ctx.CHANGED_FILES }}' },
+        command: 'echo {{ vars.prompt }}',
+      },
+    ];
+    const results = await runReviews(entries, ['/tmp/a.ts', '/tmp/b.ts'], cwd, 'diff');
+    expect(results).toHaveLength(1);
+    expect(results[0]?.status).toBe('completed');
+    // Plain paths in prompt, not shell-escaped with individual quotes
+    expect(JSON.stringify(results[0])).toContain('files: a.ts b.ts');
+  });
 });
 
 describe('reportCheckResults', () => {
@@ -186,5 +267,64 @@ describe('reportReviewResults', () => {
       { status: 'failed', name: 'a', command: 'exit 1', exitCode: 1, stdout: '', stderr: 'err' },
     ];
     expect(reportReviewResults(results)).toBe(false);
+  });
+});
+
+describe('reportCheckResultsJson', () => {
+  test('outputs JSON with passed status when all pass', () => {
+    const results: readonly CheckResult[] = [{ status: 'passed', name: 'lint', command: 'eslint' }];
+    const output = reportCheckResultsJson(results);
+    expect(output.status).toBe('passed');
+    expect(output.summary).toEqual({ passed: 1, failed: 0, skipped: 0 });
+    expect(output.checks).toHaveLength(1);
+  });
+
+  test('outputs JSON with failed status when any fail', () => {
+    const results: readonly CheckResult[] = [
+      { status: 'passed', name: 'lint', command: 'eslint' },
+      {
+        status: 'failed',
+        name: 'test',
+        command: 'vitest',
+        exitCode: 1,
+        stdout: 'out',
+        stderr: 'err',
+      },
+    ];
+    const output = reportCheckResultsJson(results);
+    expect(output.status).toBe('failed');
+    expect(output.summary).toEqual({ passed: 1, failed: 1, skipped: 0 });
+  });
+
+  test('includes skipped checks', () => {
+    const results: readonly CheckResult[] = [{ status: 'skip', name: 'a' }];
+    const output = reportCheckResultsJson(results);
+    expect(output.status).toBe('passed');
+    expect(output.summary.skipped).toBe(1);
+  });
+});
+
+describe('reportCheckResultsHooks', () => {
+  test('returns null when all pass', () => {
+    const results: readonly CheckResult[] = [{ status: 'passed', name: 'lint', command: 'eslint' }];
+    expect(reportCheckResultsHooks(results)).toBeNull();
+  });
+
+  test('returns block decision with reason when checks fail', () => {
+    const results: readonly CheckResult[] = [
+      {
+        status: 'failed',
+        name: 'test',
+        command: 'vitest',
+        exitCode: 1,
+        stdout: 'FAIL',
+        stderr: 'error',
+      },
+    ];
+    const output = reportCheckResultsHooks(results);
+    expect(output).not.toBeNull();
+    expect(output?.decision).toBe('block');
+    expect(output?.reason).toContain('test');
+    expect(output?.reason).toContain('FAIL');
   });
 });
