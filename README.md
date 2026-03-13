@@ -56,12 +56,12 @@ pnpm gatecheck check --format json
 
 **Options:**
 
-| Flag | Description |
-| --- | --- |
-| `-c, --changed <sources>` | Changed sources (comma-separated). See [Changed Sources](#changed-sources) |
-| `-t, --target <groups>` | Target groups (comma-separated or `"all"`) |
-| `-d, --dry-run` | Show which checks would run without executing |
-| `-f, --format <format>` | Output format: `text` (default), `json`, `claude-code-hooks`, `copilot-cli-hooks` |
+| Flag                      | Description                                                                       |
+| ------------------------- | --------------------------------------------------------------------------------- |
+| `-c, --changed <sources>` | Changed sources (comma-separated). See [Changed Sources](#changed-sources)        |
+| `-t, --target <groups>`   | Target groups (comma-separated or `"all"`)                                        |
+| `-d, --dry-run`           | Show which checks would run without executing                                     |
+| `-f, --format <format>`   | Output format: `text` (default), `json`, `claude-code-hooks`, `copilot-cli-hooks` |
 
 ### `gatecheck review`
 
@@ -80,17 +80,17 @@ pnpm gatecheck review --changed branch:main
 
 **Options:**
 
-| Flag | Description |
-| --- | --- |
-| `-c, --changed <sources>` | Changed sources (comma-separated) |
-| `-d, --dry-run` | Show review config and matched files without executing |
+| Flag                      | Description                                            |
+| ------------------------- | ------------------------------------------------------ |
+| `-c, --changed <sources>` | Changed sources (comma-separated)                      |
+| `-d, --dry-run`           | Show review config and matched files without executing |
 
 ### `gatecheck setup`
 
 Create or update `gatecheck.yaml` interactively.
 
-| Flag | Description |
-| --- | --- |
+| Flag                | Description                                         |
+| ------------------- | --------------------------------------------------- |
 | `--non-interactive` | Skip prompts, auto-detect presets from package.json |
 
 ## Configuration
@@ -133,33 +133,33 @@ reviews:
 
 **defaults** (optional)
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `changed` | string | Default changed sources (comma-separated) |
-| `target` | string | Default target groups (comma-separated or `"all"`) |
+| Field     | Type   | Description                                        |
+| --------- | ------ | -------------------------------------------------- |
+| `changed` | string | Default changed sources (comma-separated)          |
+| `target`  | string | Default target groups (comma-separated or `"all"`) |
 
 **checks[]**
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `name` | string | yes | Unique check identifier |
-| `match` | string | yes | Regex pattern matched against relative file paths |
-| `exclude` | string | no | Glob pattern to exclude matched files |
-| `group` | string | yes | Group name for `--target` filtering |
-| `command` | string | yes | Shell command to execute (supports templates) |
-| `changedFiles.separator` | string | no | Separator between file paths (default: `" "`) |
-| `changedFiles.path` | string | no | `"relative"` (default) or `"absolute"` |
+| Field                    | Type   | Required | Description                                       |
+| ------------------------ | ------ | -------- | ------------------------------------------------- |
+| `name`                   | string | yes      | Unique check identifier                           |
+| `match`                  | string | yes      | Regex pattern matched against relative file paths |
+| `exclude`                | string | no       | Glob pattern to exclude matched files             |
+| `group`                  | string | yes      | Group name for `--target` filtering               |
+| `command`                | string | yes      | Shell command to execute (supports templates)     |
+| `changedFiles.separator` | string | no       | Separator between file paths (default: `" "`)     |
+| `changedFiles.path`      | string | no       | `"relative"` (default) or `"absolute"`            |
 
 **reviews[]**
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `name` | string | yes | Unique review identifier |
-| `match` | string | yes | Regex pattern matched against relative file paths |
-| `exclude` | string | no | Glob pattern to exclude matched files |
-| `vars` | map | no | Template variables (can reference env, match, ctx) |
-| `command` | string | yes | Primary command to execute |
-| `fallbacks` | string[] | no | Fallback commands tried in order if primary fails |
+| Field       | Type     | Required | Description                                        |
+| ----------- | -------- | -------- | -------------------------------------------------- |
+| `name`      | string   | yes      | Unique review identifier                           |
+| `match`     | string   | yes      | Regex pattern matched against relative file paths  |
+| `exclude`   | string   | no       | Glob pattern to exclude matched files              |
+| `vars`      | map      | no       | Template variables (can reference env, match, ctx) |
+| `command`   | string   | yes      | Primary command to execute                         |
+| `fallbacks` | string[] | no       | Fallback commands tried in order if primary fails  |
 
 ## Template Engine
 
@@ -167,19 +167,19 @@ Commands and vars support `{{ scope.KEY }}` template syntax.
 
 ### Scopes
 
-| Scope | Description | Example |
-| --- | --- | --- |
-| `env` | Environment variables | `{{ env.HOME }}` |
-| `match` | Regex named capture groups | `{{ match.workspace }}` |
-| `ctx` | Runtime context | `{{ ctx.CHANGED_FILES }}` |
-| `vars` | User-defined variables | `{{ vars.prompt }}` |
+| Scope   | Description                | Example                   |
+| ------- | -------------------------- | ------------------------- |
+| `env`   | Environment variables      | `{{ env.HOME }}`          |
+| `match` | Regex named capture groups | `{{ match.workspace }}`   |
+| `ctx`   | Runtime context            | `{{ ctx.CHANGED_FILES }}` |
+| `vars`  | User-defined variables     | `{{ vars.prompt }}`       |
 
 ### Context Variables
 
-| Variable | Available in | Description |
-| --- | --- | --- |
+| Variable            | Available in    | Description                                                                   |
+| ------------------- | --------------- | ----------------------------------------------------------------------------- |
 | `ctx.CHANGED_FILES` | checks, reviews | Space-separated matched file paths. Shell-escaped in checks; plain in reviews |
-| `ctx.DIFF_SUMMARY` | reviews only | Full git diff output for review context |
+| `ctx.DIFF_SUMMARY`  | reviews only    | Full git diff output for review context                                       |
 
 ### Shell Escaping
 
@@ -199,13 +199,13 @@ command: claude -p '{{ vars.prompt }}'
 
 Values for `defaults.changed` and the `--changed` CLI option:
 
-| Value | Description |
-| --- | --- |
-| `untracked` | New files not yet tracked by git |
-| `unstaged` | Modified but not staged |
-| `staged` | Staged for commit |
+| Value           | Description                           |
+| --------------- | ------------------------------------- |
+| `untracked`     | New files not yet tracked by git      |
+| `unstaged`      | Modified but not staged               |
+| `staged`        | Staged for commit                     |
 | `branch:<name>` | Changes since branching from `<name>` |
-| `sha:<sha>` | Changes since a specific commit |
+| `sha:<sha>`     | Changes since a specific commit       |
 
 Multiple sources are comma-separated. Changes from all specified sources are combined and deduplicated.
 
@@ -299,12 +299,12 @@ Both formats output nothing on success (agent stops normally) and `{ "decision":
 
 ### Output Formats
 
-| Format | Use case |
-| --- | --- |
-| `text` | Human-readable terminal output (default) |
-| `json` | Machine-readable structured output for CI/CD |
-| `claude-code-hooks` | Claude Code Stop hook integration |
-| `copilot-cli-hooks` | Copilot CLI agentStop hook integration |
+| Format              | Use case                                     |
+| ------------------- | -------------------------------------------- |
+| `text`              | Human-readable terminal output (default)     |
+| `json`              | Machine-readable structured output for CI/CD |
+| `claude-code-hooks` | Claude Code Stop hook integration            |
+| `copilot-cli-hooks` | Copilot CLI agentStop hook integration       |
 
 ## License
 
