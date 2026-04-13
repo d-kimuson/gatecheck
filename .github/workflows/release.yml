@@ -1,0 +1,98 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  check:
+    name: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+
+      - name: Setup Node & pnpm
+        uses: ./.github/actions/setup-node
+
+      - name: Audit dependencies
+        run: pnpm audit
+
+      - name: Run linting
+        run: pnpm lint
+
+      - name: Run type checking
+        run: pnpm typecheck
+
+      - name: Run tests
+        run: pnpm test
+
+  publish:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      id-token: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+
+      - name: Setup Node & pnpm
+        uses: ./.github/actions/setup-node
+
+      - name: Setup npm registry
+        uses: actions/setup-node@8f152de45cc393bb48ce5d89d36b731f54556e65 # v4.0.0
+        with:
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Publish to npm
+        run: pnpm publish --provenance --no-git-checks --access public
+
+  release-notes:
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node & pnpm
+        uses: ./.github/actions/setup-node
+
+      - name: Generate draft release notes
+        run: pnpm exec changelogithub --draft
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Refine release notes with Claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            You are refining GitHub Release notes for gatecheck ${{ github.ref_name }}.
+            gatecheck is an npm CLI tool that sets quality gates on git changes — runs deterministic checks (lint, typecheck, test) and AI-powered reviews against changed files.
+
+            1. Read the current draft release notes:
+               gh release view "${{ github.ref_name }}" --json body -q .body
+
+            2. Read the actual code diff to understand what changed:
+               git diff ${{ github.ref_name }}^...${{ github.ref_name }} -- src/
+
+            3. Rewrite the release notes in concise, user-focused English. Rules:
+               - Group changes into categories: Features, Bug Fixes, Breaking Changes, Internal
+               - Each item should describe the user-visible impact, not the implementation detail
+               - Drop trivial items (typo fixes, formatting, internal refactors with no user impact)
+               - Keep it concise — one line per item
+               - Output only the markdown body, no fenced code blocks
+
+            4. Update the release and publish it:
+               gh release edit "${{ github.ref_name }}" --notes-file - --draft=false
+          claude_args: |
+            --max-turns 10
+            --allowedTools Bash,Read
