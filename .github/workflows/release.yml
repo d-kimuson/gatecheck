@@ -34,6 +34,9 @@ jobs:
             echo "tag=latest" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Install Dependencies
+        run: nix develop -c pnpm i --frozen-lockfile --ignore-scripts
+
       - name: Publish to npm
         run: nix develop -c pnpm publish --provenance --no-git-checks --access public --tag ${{ steps.dist-tag.outputs.tag }}
 
