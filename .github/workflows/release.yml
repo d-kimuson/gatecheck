@@ -6,31 +6,7 @@ on:
       - 'v*'
 
 jobs:
-  check:
-    name: check
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
-
-      - name: Setup Node & pnpm
-        uses: ./.github/actions/setup-node
-
-      - name: Audit dependencies
-        run: pnpm audit
-
-      - name: Run linting
-        run: pnpm lint
-
-      - name: Run type checking
-        run: pnpm typecheck
-
-      - name: Run tests
-        run: pnpm test
-
   publish:
-    needs: check
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

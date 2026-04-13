@@ -117,6 +117,15 @@ if (!confirmed) {
   process.exit(0);
 }
 
+// -- Pre-release checks --
+
+console.log('\nRunning checks...\n');
+runOrFail('pnpm audit', 'Audit');
+runOrFail('pnpm lint', 'Lint');
+runOrFail('pnpm typecheck', 'Typecheck');
+runOrFail('pnpm test', 'Test');
+console.log('\n✓ All checks passed.\n');
+
 // -- Update package.json --
 
 pkg.version = nextVersion;
