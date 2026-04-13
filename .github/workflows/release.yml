@@ -58,29 +58,32 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
       - name: Refine release notes with Claude
-        uses: anthropics/claude-code-action@v1
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          prompt: |
-            You are refining GitHub Release notes for gatecheck ${{ github.ref_name }}.
-            gatecheck is an npm CLI tool that sets quality gates on git changes — runs deterministic checks (lint, typecheck, test) and AI-powered reviews against changed files.
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          DRAFT="$(gh release view "$TAG" --json body -q .body)"
+          DIFF="$(git diff "${TAG}^...${TAG}" -- src/ || true)"
 
-            1. Read the current draft release notes:
-               gh release view "${{ github.ref_name }}" --json body -q .body
+          NOTES="$(claude -p "You are refining GitHub Release notes for gatecheck ${TAG}.
+          gatecheck is an npm CLI tool that sets quality gates on git changes — runs deterministic checks (lint, typecheck, test) and AI-powered reviews against changed files.
 
-            2. Read the actual code diff to understand what changed:
-               git diff ${{ github.ref_name }}^...${{ github.ref_name }} -- src/
+          Here are the draft release notes generated from conventional commits:
+          ${DRAFT}
 
-            3. Rewrite the release notes in concise, user-focused English. Rules:
-               - Group changes into categories: Features, Bug Fixes, Breaking Changes, Internal
-               - Each item should describe the user-visible impact, not the implementation detail
-               - Drop trivial items (typo fixes, formatting, internal refactors with no user impact)
-               - Keep it concise — one line per item
-               - Output only the markdown body, no fenced code blocks
+          Here is the actual code diff:
+          ${DIFF}
 
-            4. Update the release and publish it:
-               gh release edit "${{ github.ref_name }}" --notes-file - --draft=false
-          claude_args: |
-            --max-turns 10
-            --allowedTools Bash,Read
+          Rewrite the release notes in concise, user-focused English. Rules:
+          - Group changes into categories: Features, Bug Fixes, Breaking Changes, Internal
+          - Each item should describe the user-visible impact, not the implementation detail
+          - Drop trivial items (typo fixes, formatting, internal refactors with no user impact)
+          - Keep it concise — one line per item
+          - Output only the raw markdown body, no fenced code blocks wrapping the entire output")"
+
+          echo "$NOTES" | gh release edit "$TAG" --notes-file - --draft=false
