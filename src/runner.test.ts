@@ -1,4 +1,5 @@
 import { describe, test, expect } from 'vitest';
+import { parseStopHookActive } from './bin.ts';
 import {
   runChecks,
   runReviews,
@@ -326,5 +327,35 @@ describe('reportCheckResultsHooks', () => {
     expect(output?.decision).toBe('block');
     expect(output?.reason).toContain('test');
     expect(output?.reason).toContain('FAIL');
+  });
+});
+
+describe('parseStopHookActive', () => {
+  test('returns false for empty string', () => {
+    expect(parseStopHookActive('')).toBe(false);
+  });
+
+  test('returns false for whitespace-only string', () => {
+    expect(parseStopHookActive('  \n')).toBe(false);
+  });
+
+  test('returns false for invalid JSON', () => {
+    expect(parseStopHookActive('not json')).toBe(false);
+  });
+
+  test('returns false when stop_hook_active is missing', () => {
+    expect(parseStopHookActive('{"tool_name":"Bash"}')).toBe(false);
+  });
+
+  test('returns false when stop_hook_active is false', () => {
+    expect(parseStopHookActive('{"stop_hook_active":false}')).toBe(false);
+  });
+
+  test('returns true when stop_hook_active is true', () => {
+    expect(parseStopHookActive('{"stop_hook_active":true}')).toBe(true);
+  });
+
+  test('returns false for non-object JSON', () => {
+    expect(parseStopHookActive('"hello"')).toBe(false);
   });
 });

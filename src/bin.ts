@@ -63,14 +63,47 @@ const filterByTarget = <T extends { readonly group: string }>(
 
 // -- Output format --
 
-type OutputFormat = 'text' | 'json' | 'claude-code-hooks' | 'copilot-cli-hooks';
+type OutputFormat =
+  | 'text'
+  | 'json'
+  | 'claude-code-hooks'
+  | 'claude-code-hooks-strict'
+  | 'copilot-cli-hooks';
 
 const parseFormat = (raw: string | undefined): OutputFormat => {
   if (raw === 'json') return 'json';
   if (raw === 'claude-code-hooks') return 'claude-code-hooks';
+  if (raw === 'claude-code-hooks-strict') return 'claude-code-hooks-strict';
   if (raw === 'copilot-cli-hooks') return 'copilot-cli-hooks';
   return 'text';
 };
+
+// -- stdin (hooks input) --
+
+const readStdin = (): Promise<string> =>
+  new Promise((resolve) => {
+    if (process.stdin.isTTY) {
+      resolve('');
+      return;
+    }
+    const chunks: Buffer[] = [];
+    process.stdin.on('data', (chunk: Buffer) => chunks.push(chunk));
+    process.stdin.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
+  });
+
+export const parseStopHookActive = (raw: string): boolean => {
+  if (raw.trim() === '') return false;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null) return false;
+    if (!('stop_hook_active' in parsed)) return false;
+    return (parsed as Record<string, unknown>)['stop_hook_active'] === true;
+  } catch {
+    return false;
+  }
+};
+
+const isStopHookActive = async (): Promise<boolean> => parseStopHookActive(await readStdin());
 
 // -- check command --
 
@@ -95,7 +128,11 @@ const check = async (opts: CheckOpts): Promise<void> => {
   if (entries.length === 0) {
     if (fmt === 'text') log('No checks configured.');
     if (fmt === 'json') log(JSON.stringify(reportCheckResultsJson([])));
-    if (fmt === 'claude-code-hooks' || fmt === 'copilot-cli-hooks') {
+    if (
+      fmt === 'claude-code-hooks' ||
+      fmt === 'claude-code-hooks-strict' ||
+      fmt === 'copilot-cli-hooks'
+    ) {
       // No checks = no block
     }
     return;
@@ -139,7 +176,16 @@ const check = async (opts: CheckOpts): Promise<void> => {
       if (output.status === 'failed') process.exitCode = 1;
       break;
     }
-    case 'claude-code-hooks':
+    case 'claude-code-hooks': {
+      if (await isStopHookActive()) break;
+      const output = reportCheckResultsHooks(results);
+      if (output !== null) {
+        log(JSON.stringify(output));
+        process.exitCode = 1;
+      }
+      break;
+    }
+    case 'claude-code-hooks-strict':
     case 'copilot-cli-hooks': {
       const output = reportCheckResultsHooks(results);
       if (output !== null) {
@@ -223,6 +269,7 @@ program
       'text',
       'json',
       'claude-code-hooks',
+      'claude-code-hooks-strict',
       'copilot-cli-hooks',
     ]),
   )
