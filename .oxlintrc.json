@@ -247,6 +247,7 @@
     "**/.vite/**",
     "**/*.generated.*",
     "**/generated/**",
-    "**/*.tsbuildinfo"
+    "**/*.tsbuildinfo",
+    "scripts/**"
   ]
 }

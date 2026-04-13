@@ -11,7 +11,7 @@
   ],
   "type": "module",
   "scripts": {
-    "cli": "tsx ./src/bin.ts",
+    "cli": "node ./src/bin.ts",
     "test": "vitest run",
     "build": "tsdown",
     "typecheck": "tsc --noEmit",
@@ -21,6 +21,7 @@
     "fix": "run-s fix:*",
     "fix:oxlint": "pnpm lint:oxlint --fix --fix-suggestions --fix-dangerously",
     "fix:oxfmt": "oxfmt --ignore-path .gitignore --no-error-on-unmatched-pattern",
+    "release": "node scripts/release.ts",
     "prepack": "pnpm build && clean-pkg-json",
     "prepare": "lefthook install"
   },
@@ -40,7 +41,6 @@
     "oxlint-tsgolint": "0.16.0",
     "publint": "0.3.18",
     "tsdown": "0.20.3",
-    "tsx": "4.21.0",
     "typescript": "5.9.3",
     "unplugin-unused": "0.5.7",
     "valibot": "1.2.0",

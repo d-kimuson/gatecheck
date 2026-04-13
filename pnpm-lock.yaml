@@ -53,9 +53,6 @@ importers:
       tsdown:
         specifier: 0.20.3
         version: 0.20.3(publint@0.3.18)(typescript@5.9.3)(unplugin-unused@0.5.7)
-      tsx:
-        specifier: 4.21.0
-        version: 4.21.0
       typescript:
         specifier: 5.9.3
         version: 5.9.3
@@ -3405,6 +3402,7 @@ snapshots:
       get-tsconfig: 4.13.6
     optionalDependencies:
       fsevents: 2.3.3
+    optional: true
 
   typescript@5.9.3: {}
 
