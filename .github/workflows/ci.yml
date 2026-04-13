@@ -26,10 +26,10 @@ jobs:
           cachix-auth-token: '${{ secrets.CACHIX_AUTH_TOKEN }}'
 
       - name: Run linting
-        run: pnpm lint
+        run: nix develop -c pnpm lint
 
       - name: Run type checking
-        run: pnpm typecheck
+        run: nix develop -c pnpm typecheck
 
       - name: Run tests
-        run: pnpm test
+        run: nix develop -c pnpm test

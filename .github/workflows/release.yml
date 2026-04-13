@@ -35,7 +35,7 @@ jobs:
           fi
 
       - name: Publish to npm
-        run: pnpm publish --provenance --no-git-checks --access public --tag ${{ steps.dist-tag.outputs.tag }}
+        run: nix develop -c pnpm publish --provenance --no-git-checks --access public --tag ${{ steps.dist-tag.outputs.tag }}
 
   release-notes:
     needs: publish
