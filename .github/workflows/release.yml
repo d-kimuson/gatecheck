@@ -23,8 +23,18 @@ jobs:
         with:
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Determine npm dist-tag
+        id: dist-tag
+        run: |
+          TAG="${{ github.ref_name }}"
+          if [[ "$TAG" == *-* ]]; then
+            echo "tag=${TAG##*-}" | sed 's/\.[0-9]*$//' >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=latest" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish to npm
-        run: pnpm publish --provenance --no-git-checks --access public
+        run: pnpm publish --provenance --no-git-checks --access public --tag ${{ steps.dist-tag.outputs.tag }}
 
   release-notes:
     needs: publish
