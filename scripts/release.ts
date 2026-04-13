@@ -1,5 +1,3 @@
-#!/usr/bin/env tsx
-
 import { execSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -50,40 +48,42 @@ if (gpgFormat !== 'ssh' || commitSign !== 'true' || tagSign !== 'true') {
 
 // -- Prompt version --
 
-const bumpChoices = (v: string): { name: string; value: string }[] => {
-  const parts = v.split('-');
-  const [major, minor, patch] = (parts[0] ?? '').split('.').map(Number) as [number, number, number];
-  const pre = parts[1]; // e.g. "beta.5"
+const parseVersion = (
+  v: string,
+): { major: number; minor: number; patch: number; pre: string | undefined } => {
+  const [base, pre] = v.split('-');
+  const segments = (base ?? '').split('.').map(Number);
+  return { major: segments[0] ?? 0, minor: segments[1] ?? 0, patch: segments[2] ?? 0, pre };
+};
 
-  const choices: { name: string; value: string }[] = [];
+const bumpChoices = (v: string): { name: string; value: string }[] => {
+  const { major, minor, patch, pre } = parseVersion(v);
 
   if (pre !== undefined) {
-    // Currently a prerelease — offer next prerelease + graduate
     const preParts = pre.split('.');
-    const preNum = Number(preParts[1] ?? 0);
     const preTag = preParts[0] ?? 'beta';
-    choices.push({
-      name: `${major}.${minor}.${patch}-${preTag}.${preNum + 1} (pre-${preTag})`,
-      value: `${major}.${minor}.${patch}-${preTag}.${preNum + 1}`,
-    });
-    choices.push({
-      name: `${major}.${minor}.${patch} (graduate)`,
-      value: `${major}.${minor}.${patch}`,
-    });
+    const preNum = Number(preParts[1] ?? 0);
+    const nextPre = `${major}.${minor}.${patch}-${preTag}.${preNum + 1}`;
+    return [
+      { name: `${preTag} (${nextPre})`, value: nextPre },
+      { name: `patch (${major}.${minor}.${patch})`, value: `${major}.${minor}.${patch}` },
+      { name: `minor (${major}.${minor + 1}.0)`, value: `${major}.${minor + 1}.0` },
+      { name: `major (${major + 1}.0.0)`, value: `${major + 1}.0.0` },
+    ];
   }
 
-  choices.push(
-    { name: `${major}.${minor}.${patch + 1} (patch)`, value: `${major}.${minor}.${patch + 1}` },
-    { name: `${major}.${minor + 1}.0 (minor)`, value: `${major}.${minor + 1}.0` },
-    { name: `${major + 1}.0.0 (major)`, value: `${major + 1}.0.0` },
-  );
-
-  return choices;
+  const nextPatch = `${major}.${minor}.${patch + 1}`;
+  return [
+    { name: `patch (${nextPatch})`, value: nextPatch },
+    { name: `minor (${major}.${minor + 1}.0)`, value: `${major}.${minor + 1}.0` },
+    { name: `major (${major + 1}.0.0)`, value: `${major + 1}.0.0` },
+    { name: `beta (${nextPatch}-beta.0)`, value: `${nextPatch}-beta.0` },
+  ];
 };
 
 const { version } = await inquirer.prompt<{ version: string }>([
   {
-    type: 'list',
+    type: 'rawlist',
     name: 'version',
     message: 'Select release version:',
     choices: [...bumpChoices(current), { name: 'Custom', value: 'custom' }],
