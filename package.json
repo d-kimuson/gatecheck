@@ -1,6 +1,6 @@
 {
   "name": "gatecheck",
-  "version": "0.0.1-beta.13",
+  "version": "0.0.1",
   "description": "Quality gate for git changes — run checks and AI reviews against changed files",
   "license": "MIT",
   "repository": {
